@@ -1,0 +1,144 @@
+---
+title: "map_clinvar_to_uniprot_with_vepout"
+output: html_document
+date: "2026-11-05"
+---
+
+```{r, map clinvar to uniprot - first step: process vepinput}
+
+clinvar <- fread("~/Downloads/variant_summary_07-10-2023.txt")
+clinvar <- subset(clinvar, clinvar$Type == "single nucleotide variant")
+clinvar <- subset(clinvar, clinvar$Assembly == "GRCh38")
+clinvar <- subset(clinvar, clinvar$ClinicalSignificance == "Pathogenic" | clinvar$ClinicalSignificance == "Likely pathogenic" | clinvar$ClinicalSignificance == "Pathogenic/Likely pathogenic" | clinvar$ClinicalSignificance == "Benign" | clinvar$ClinicalSignificance == "Likely benign" | clinvar$ClinicalSignificance == "Benign/Likely benign")
+clinvar <- clinvar[!grep(pattern = "=", clinvar$Name, fixed = TRUE),]
+clinvar <- clinvar[grep(pattern = "(p.", clinvar$Name, fixed = TRUE),]
+clinvar <- clinvar[!grep(pattern = "Ter", clinvar$Name, fixed = TRUE),]
+
+vep_input <- dplyr::select(clinvar, Chromosome, Start, Stop, ReferenceAlleleVCF, AlternateAlleleVCF)
+vep_input$allele <- paste0(vep_input$ReferenceAlleleVCF, "/", vep_input$AlternateAlleleVCF)
+vep_input <- vep_input[,-4:-5]
+vep_input$strand <- rep("+", nrow(vep_input))
+setkeyv(vep_input, c("Chromosome", "Start"))
+
+fwrite(vep_input, "~/alphamissense_analysis/clinvar_vep_input.txt", col.names = FALSE, sep = "\t")
+
+```
+
+```{r, step two: create transcript map from uniprot idmapping table}
+
+idmapping <- fread("~/alphamissense_analysis/HUMAN_9606_idmapping_selected.tab")
+
+linker <- dplyr::select(idmapping, V1, V20)
+linker[linker == ''] <- NA
+linker <- na.omit(linker)
+linker_simple <- subset(linker, nchar(linker$V20) <= 18)
+linker_split <- subset(linker,!(nchar(linker$V20) <= 18))
+linker_split <- tidyr::separate(data = linker_split, col = V20, into = c("split1", "split2", "split3", "split4", "split5", "split6", "split7", "split8", "split9", "split10", "split11", "split12", "split13", "split14", "split15", "split16", "split17", "split18", "split19", "split20", "split21", "split22", "split23", "split24", "split25", "split26","split27", "split28", "split29", "split30", "split31", "split32", "split33", "split34","split35","split36", "split37", "split38", "split39", "split40", "split41", "split42", "split43", "split44","split45", "split46", "split47", "split48", "split49", "split50", "split51", "split52", "split53","split54", "split55", "split56", "split57", "split58", "split59", "split60", "split61","split62","split63", "split64", "split65", "split66", "split67", "split68", "split69", "split70", "split71","split72", "split73", "split74", "split75", "split76", "split77", "split78", "split79", "split80","split81", "split82", "split83", "split84", "split85", "split86", "split87", "split88", "split89","split90", "split91", "split92", "split93", "split94", "split95", "split96", "split97", "split98","split99", "split100", "split101", "split102", "split103", "split104", "split105", "split106"), sep = "; ", remove = TRUE)
+
+test <- linker_split$split106
+test <- na.omit(test)
+
+linker_seperated <- data.table()
+colnames <- c("uniprot", "ensg")
+
+for (i in 1:nrow(linker_split)) {
+row <- linker_split[i,]
+for (z in 2:107) {
+row2 <- row[,c(1, z)]
+colnames(row2) <- colnames
+linker_seperated <- rbind(linker_seperated, row2)
+}
+}
+
+colnames(linker_simple) <- colnames
+linker <- rbind(linker_simple, linker_seperated)
+
+colnames(linker) <- c("uniprot", "enst")
+
+fwrite(linker, "~/alphamissense_analysis/human_uniprot_linker_09-2023.txt")
+
+
+```
+
+```{r, step 3: process vepoutput and save mapped clinvar file}
+
+library(BiocManager)
+library(Biostrings)
+
+# Filter clinvar 
+
+clinvar <- fread("~/alphamissense_analysis/variant_summary_07-10-2023.txt")
+clinvar <- subset(clinvar, clinvar$Type == "single nucleotide variant")
+clinvar <- subset(clinvar, clinvar$Assembly == "GRCh38")
+clinvar <- subset(clinvar, clinvar$ClinicalSignificance == "Pathogenic" | clinvar$ClinicalSignificance == "Likely pathogenic" | clinvar$ClinicalSignificance == "Pathogenic/Likely pathogenic" | clinvar$ClinicalSignificance == "Benign" | clinvar$ClinicalSignificance == "Likely benign" | clinvar$ClinicalSignificance == "Benign/Likely benign")
+clinvar <- clinvar[!grep(pattern = "=", clinvar$Name, fixed = TRUE),]
+clinvar <- clinvar[grep(pattern = "(p.", clinvar$Name, fixed = TRUE),]
+clinvar <- clinvar[!grep(pattern = "Ter", clinvar$Name, fixed = TRUE),]
+
+# map vepoutput to clinvar
+
+clinvar_vepout <- fread("~/alphamissense_analysis/clinvar_vep_output_missense.txt")
+clinvar_vepout <- dplyr::select(clinvar_vepout, V2, V5, V10, V11, V18, V3)
+chromosome <- sapply(strsplit(clinvar_vepout$V2,":"), `[`, 1)
+position <- sapply(strsplit(clinvar_vepout$V2,":"), `[`, 2)
+ref <- sapply(strsplit(clinvar_vepout$V11,"/"), `[`, 1)
+alt <- sapply(strsplit(clinvar_vepout$V11,"/"), `[`, 2)
+clinvar_vepout$chromosome <- chromosome
+clinvar_vepout$position <- position
+clinvar_vepout$ref <- ref
+clinvar_vepout$alt <- alt
+clinvar_vepout <- clinvar_vepout[,-1]
+clinvar_vepout <- clinvar_vepout[,-3]
+clinvar_vepout <- as.data.frame(clinvar_vepout)
+
+
+colnames(clinvar_vepout) <- c("enst", "res_pos", "ReferenceAlleleVCF", "AlternateAlleleVCF", "Chromosome", "Start", "ref", "alt")
+
+clinvar_vepout$Start <- as.numeric(clinvar_vepout$Start)
+clinvar_vepout$res_pos <- as.numeric(clinvar_vepout$res_pos)
+
+clinvar_mapped <- merge(clinvar_vepout, clinvar, by=c("Chromosome", "Start", "ReferenceAlleleVCF", "AlternateAlleleVCF"))
+
+# Now we just need to restrict to only canonical transcripts (GENCODE) Read in gencode transcripts
+
+linker <- fread("~/alphamissense_analysis/human_uniprot_linker_09-2023.txt")
+
+linker$enst <- as.data.table(gsub(x = linker$enst, pattern = "\\.[^.]*", replacement = ""))
+
+gencode <- readAAStringSet("~/alphamissense_analysis/gencode.v44.pc_translations.fa.gz")
+seq_name = names(gencode)
+sequence = paste(gencode)
+gencode_dataframe <- data.frame(seq_name, sequence)
+afrefprot <- readAAStringSet("~/alphamissense_analysis/UP000005640_9606.fasta.gz")
+seq_name = names(afrefprot)
+sequence = paste(afrefprot)
+afrefprot_dataframe <- data.frame(seq_name, sequence)
+
+V1 <- strsplit(x = gencode_dataframe$seq_name, split = "|", fixed = TRUE)
+transcripts <- sapply( V1, "[", 2 )
+transcripts <- gsub(x = transcripts, pattern = "\\.[^.]*", replacement = "")
+
+transcript_set <- data.table(transcripts, gencode_dataframe$sequence)
+
+V1 <- strsplit(x = afrefprot_dataframe$seq_name, split = "|", fixed = TRUE)
+uniprot <- sapply( V1, "[", 2 )
+
+uniprot_set <- data.table(uniprot, afrefprot_dataframe$sequence)
+
+gencode_reference_proteome <- merge(transcript_set, uniprot_set, by = c("V2"))
+
+fwrite(gencode_reference_proteome, "~/gencode_reference_proteome.csv", col.names = F)
+
+gencode_reference_proteome <- gencode_reference_proteome[,-1]
+
+clinvar_mapped <- clinvar_mapped[clinvar_mapped$enst %in% GENCODE_reference_proteome$transcripts,]
+
+colnames(gencode_reference_proteome) <- c("enst", "uniprot")
+clinvar_mapped <- merge(gencode_reference_proteome, clinvar_mapped, by = c("enst"))
+
+#clinvar_mapped <- clinvar_mapped[,-1]
+clinvar_mapped <- unique(clinvar_mapped)
+
+fwrite(clinvar_mapped, "~/alphamissense_analysis/clinvar_mapped_to_uniprot.csv")
+
+```

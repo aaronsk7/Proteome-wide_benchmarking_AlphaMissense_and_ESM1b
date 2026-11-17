@@ -1,0 +1,3289 @@
+---
+title: "perform analysis"
+output: html_notebook
+---
+
+```{r, process for analysis}
+
+library(data.table)
+
+data <- fread("~/alphamissense_analysis/pfam&membrane_mapped_to_clinvar.txt")
+
+data$database <- rep("ClinVar", nrow(data))
+
+data <- subset(data, data$ReviewStatus == "criteria provided, single submitter" | data$ReviewStatus == "criteria provided, multiple submitters, no conflicts" | data$ReviewStatus == "reviewed by expert panel" | data$ReviewStatus == "practice guideline")
+data <- data[!data$alt == "-"]
+data <- unique(data)
+
+
+## Label ESM scores for each variant as pathogenic or benign
+
+data <- rbind(esm1b_benign, esm1b_path, esm1b_ambiguous)
+data <- rbind(data, esm1b_na)
+
+esm1b_benign <- subset(data, data$esm1b_score >= (-7.5))
+
+esm1b_path <- subset(data, data$esm1b_score < (-7.5))
+
+esm1b_ambiguous <- subset(data, data$esm1b_score == (-7.5))
+
+esm1b_na <- subset(data, is.na(data$esm1b_score))
+
+sanity_che <- sum(nrow(esm1b_path), nrow(esm1b_benign), nrow(esm1b_ambiguous),nrow(esm1b_na))
+
+esm1b_prediction <- rep("pathogenic", nrow(esm1b_path))
+esm1b_path$esm1b_prediction <- esm1b_prediction
+
+esm1b_prediction <- rep("benign", nrow(esm1b_benign))
+esm1b_benign$esm1b_prediction <- esm1b_prediction
+
+esm1b_prediction <- rep("", nrow(esm1b_na))
+esm1b_na$esm1b_prediction <- esm1b_prediction
+
+data <- rbind(esm1b_benign, esm1b_path)
+data <- rbind(data, esm1b_na)
+
+
+## Build am classification
+
+am_benign <- subset(data, data$am_score <= 0.34)
+
+am_path <- subset(data, data$am_score >= 0.564)
+
+am_ambiguous <- subset(data, data$am_score > 0.34 & data$am_score < 0.564)
+
+am_na <- subset(data, is.na(data$am_score))
+
+sanity_che <- sum(nrow(am_path), nrow(am_benign),nrow(am_na))
+
+am_prediction <- rep("pathogenic", nrow(am_path))
+am_path$am_prediction <- am_prediction
+
+am_prediction <- rep("benign", nrow(am_benign))
+am_benign$am_prediction <- am_prediction
+
+am_prediction <- rep("ambiguous", nrow(am_ambiguous))
+am_ambiguous$am_prediction <- am_prediction
+
+am_prediction <- rep("", nrow(am_na))
+am_na$am_prediction <- am_prediction
+
+data <- rbind(am_benign, am_path, am_ambiguous)
+data <- rbind(data, am_na)
+
+am_benign <- subset(data, data$am_score <= 0.34)
+
+am_path <- subset(data, data$am_score >= 0.564)
+
+am_ambiguous <- subset(data, data$am_score > 0.34 & data$am_score < 0.564)
+
+am_na <- subset(data, is.na(data$am_score))
+
+sanity_che <- sum(nrow(am_path), nrow(am_benign), nrow(am_ambiguous),nrow(am_na))
+
+am_prediction <- rep("pathogenic", nrow(am_path))
+am_path$am_prediction <-am_prediction
+
+am_prediction <- rep("benign", nrow(am_benign))
+am_benign$am_prediction <- am_prediction
+
+am_prediction <- rep("ambiguous", nrow(am_ambiguous))
+am_ambiguous$am_prediction <- am_prediction
+
+am_prediction <- rep("", nrow(am_na))
+am_na$esm1b_prediction <- am_prediction
+
+data <- rbind(am_benign, am_path, am_ambiguous)
+data <- rbind(data, am_na)
+
+## Simplify clinical outcome column to either benign or pathogenic (rather than likely pathogenic etc.)
+
+clinical_pathogenic <- data[data$ClinicalSignificance == "Pathogenic" | data$ClinicalSignificance == "Likely pathogenic" | data$ClinicalSignificance == "Pathogenic/Likely pathogenic"]
+clinical_prediction <- rep("pathogenic", nrow(clinical_pathogenic))
+clinical_pathogenic$clinical_prediction <- clinical_prediction
+
+clinical_benign <- data[data$ClinicalSignificance == "Benign" | data$ClinicalSignificance == "Likely benign" | data$ClinicalSignificance == "Benign/Likely benign"]
+clinical_prediction <- rep("benign", nrow(clinical_benign))
+clinical_benign$clinical_prediction <- clinical_prediction
+
+sanity_che2 <- sum(nrow(clinical_pathogenic), nrow(clinical_benign))
+
+data <- rbind(clinical_benign, clinical_pathogenic)
+
+data <- unique(data)
+
+## put back diseases and somatic/germline
+
+clinvar <- fread("~/alphamissense_analysis/clinvar_mapped_to_uniprot.csv")
+clinvar <- subset(clinvar, clinvar$Type == "single nucleotide variant")
+clinvar <- subset(clinvar, clinvar$Assembly == "GRCh38")
+clinvar <- subset(clinvar, clinvar$ClinicalSignificance == "Pathogenic" | clinvar$ClinicalSignificance == "Likely pathogenic" | clinvar$ClinicalSignificance == "Pathogenic/Likely pathogenic" | clinvar$ClinicalSignificance == "Benign" | clinvar$ClinicalSignificance == "Likely benign" | clinvar$ClinicalSignificance == "Benign/Likely benign")
+clinvar <- clinvar[!grep(pattern = "=", clinvar$Name, fixed = TRUE),]
+clinvar <- clinvar[grep(pattern = "(p.", clinvar$Name, fixed = TRUE),]
+clinvar <- clinvar[!grep(pattern = "Ter", clinvar$Name, fixed = TRUE),]
+
+mapping <- clinvar[,c(2,7:9,23:24)]
+disease_set <- merge(data, mapping, by = c("uniprot", "res_pos", "ref", "alt"))
+disease_set <- unique(disease_set)
+
+dup_rows <- duplicated(disease_set[, c("uniprot", "res_pos", "ref", "alt")], fromLast = TRUE)
+disease_set <- disease_set[!dup_rows, ]
+
+## add normalised esm1b scores
+
+disease_set$esm1b_normalized <- (disease_set$esm1b_score - min(disease_set$esm1b_score)) / (max(disease_set$esm1b_score) - min(disease_set$esm1b_score))
+disease_set$esm1b_normalized <- 1 - disease_set$esm1b_normalized
+
+```
+
+```{r, normalise esm1b scores for statistical test}
+
+## normalise data and invert esm1b
+data$esm1b_normalized <- (data$esm1b_score - min(data$esm1b_score)) / (max(data$esm1b_score) - min(data$esm1b_score))
+data$esm1b_normalized <- 1 - data$esm1b_normalized
+
+## perform statstical test on all data
+wilcox.test(data$am_score, data$esm1b_normalized, paired = TRUE)$p.value
+
+```
+
+```{r, overall mcc and setup mcc analysis further}
+
+## Load libraries
+
+library(cvAUC)
+library(mltools)
+library(pROC)
+
+## setup data for MCC calculation
+
+data$clinical_prediction <- gsub("benign", x = data$clinical_prediction, replacement = 0)
+data$clinical_prediction <- gsub("pathogenic", x = data$clinical_prediction, replacement = 1)
+data$clinical_prediction <- as.numeric(data$clinical_prediction)
+data$am_prediction <- gsub("benign", x = data$am_prediction, replacement = "0")
+data$am_prediction <- gsub("pathogenic", x = data$am_prediction, replacement = "1")
+data$am_prediction <- as.numeric(data$am_prediction)
+data$esm1b_prediction <- gsub("benign", x = data$esm1b_prediction, replacement = 0)
+data$esm1b_prediction <- gsub("pathogenic", x = data$esm1b_prediction, replacement = 1)
+data$esm1b_prediction <- as.numeric(data$esm1b_prediction)
+
+data <- na.omit(data)
+
+## calculate overall accuracy
+
+am_correct_counts <- nrow(data[data$am_prediction == data$clinical_prediction,])
+am_total_counts <- nrow(data)
+overall_am_accuracy <- am_correct_counts/am_total_counts*100
+
+esm_correct_counts <- nrow(data[data$esm1b_prediction == data$clinical_prediction,])
+esm_total_counts <- nrow(data)
+overall_esm_accuracy <- esm_correct_counts/esm_total_counts*100
+
+## calculate overall AUC
+
+roc_object <- roc(data2$clinical_prediction, data2$am_score)
+am_auc <- roc_object$auc
+
+am_auc <- as.numeric(paste(am_auc))
+
+roc_object <- roc(data2$clinical_prediction, data2$esm1b_score)
+esm_auc <- roc_object$auc
+
+esm_auc <- as.numeric(paste(esm_auc))
+
+# calculate overall MCC
+
+overall_am_mcc <- mcc(data2$am_prediction, data2$clinical_prediction)
+overall_esm_mcc <- mcc(data2$esm1b_prediction, data2$clinical_prediction)
+
+
+# overall accuracy of ClinVar variants
+
+ClinVar_data <- data2[data2$database == "ClinVar"]
+am_correct_counts <- nrow(ClinVar_data[ClinVar_data$am_prediction == ClinVar_data$clinical_prediction,])
+am_total_counts <- nrow(ClinVar_data)
+am_clinvar_accuracy <- am_correct_counts/am_total_counts*100
+
+ClinVar_data <- data2[data2$database == "ClinVar"]
+am_correct_counts <- nrow(ClinVar_data[ClinVar_data$esm1b_prediction == ClinVar_data$clinical_prediction,])
+am_total_counts <- nrow(ClinVar_data)
+esm_clinvar_accuracy <- am_correct_counts/am_total_counts*100
+
+# overall MCC of ClinVar variants
+
+clinvar_am_mcc <- mcc(ClinVar_data$am_prediction, ClinVar_data$clinical_prediction)
+clinvar_esm_mcc <- mcc(ClinVar_data$esm1b_prediction, ClinVar_data$clinical_prediction)
+
+# Count pathogenic percentage predictions for AM and ESM1b
+
+am_path_perc <- nrow(data[data$am_prediction == 1])/nrow(data)*100
+esm_path_perc <- nrow(data[data$esm1b_prediction == 1])/nrow(data)*100
+true_path_perc <- nrow(data[data$clinical_prediction == 1])/nrow(data)*100
+
+## Count number of proteins and benign/pathogenic variants
+
+total_protein_count <- length(unique(data$uniprot))
+total_path_count <- nrow(data[data$clinical_prediction == 1])
+total_benign_count <- nrow(data[data$clinical_prediction == 0])
+
+```
+
+```{r, normalise esm1b scores for wilcoxon statistical test}
+
+## normalise data and invert esm1b
+data$esm1b_normalized <- (data$esm1b_score - min(data$esm1b_score)) / (max(data$esm1b_score) - min(data$esm1b_score))
+data$esm1b_normalized <- 1 - data$esm1b_normalized
+
+## perform statstical test on all data
+wilcox.test(data$am_score, data$esm1b_normalized, paired = TRUE)$p.value
+
+```
+
+```{r, build test function}
+
+analyse_protein_group <- function(group_data, group_name, B = 5000) {
+
+  ## Counts before filtering
+
+  total_counts <- nrow(group_data)
+
+  path_counts <- sum(
+    group_data$clinical_prediction == 1,
+    na.rm = TRUE
+  )
+
+  benign_counts <- sum(
+    group_data$clinical_prediction == 0,
+    na.rm = TRUE
+  )
+
+  protein_count <- uniqueN(group_data$uniprot, na.rm = TRUE)
+
+  ## Complete cases for paired model comparisons
+
+  required_cols <- c(
+    "clinical_prediction",
+    "am_score",
+    "esm1b_score",
+    "am_prediction",
+    "esm1b_prediction"
+  )
+
+  analysed <- group_data[
+    complete.cases(group_data[, ..required_cols])
+  ]
+
+  analysed_counts <- nrow(analysed)
+
+  analysed_path_counts <- sum(
+    analysed$clinical_prediction == 1
+  )
+
+  analysed_benign_counts <- sum(
+    analysed$clinical_prediction == 0
+  )
+
+  analysed_protein_count <- uniqueN(
+    analysed$uniprot,
+    na.rm = TRUE
+  )
+
+  ## Initialise results
+
+  am_auc <- NA_real_
+  esm_auc <- NA_real_
+  auc_diff <- NA_real_
+  auc_diff_ci_lower <- NA_real_
+  auc_diff_ci_upper <- NA_real_
+  auc_p <- NA_real_
+
+  am_mcc <- NA_real_
+  esm_mcc <- NA_real_
+  mcc_diff <- NA_real_
+  mcc_diff_ci_lower <- NA_real_
+  mcc_diff_ci_upper <- NA_real_
+
+  wilcox_p <- NA_real_
+
+  ## MCC comparison
+
+  if (analysed_counts > 0) {
+
+    am_mcc <- mcc(
+      analysed$clinical_prediction,
+      analysed$am_prediction
+    )
+
+    esm_mcc <- mcc(
+      analysed$clinical_prediction,
+      analysed$esm1b_prediction
+    )
+
+    mcc_diff <- am_mcc - esm_mcc
+  }
+
+  ## Reverse ESM1b score for AUC calculation
+
+  analysed[, esm1b_score_reversed := -esm1b_score]
+
+  ## AUC and bootstrap require both clinical classes
+
+  if (
+    analysed_path_counts > 0 &
+    analysed_benign_counts > 0
+  ) {
+
+    y <- analysed$clinical_prediction
+
+    idx_0 <- which(y == 0)
+    idx_1 <- which(y == 1)
+
+    ## Original ROC curves
+
+    roc_am <- roc(
+      y,
+      analysed$am_score,
+      levels = c(0, 1),
+      direction = "<",
+      quiet = TRUE
+    )
+
+    roc_esm <- roc(
+      y,
+      analysed$esm1b_score_reversed,
+      levels = c(0, 1),
+      direction = "<",
+      quiet = TRUE
+    )
+
+    am_auc <- as.numeric(auc(roc_am))
+    esm_auc <- as.numeric(auc(roc_esm))
+
+    auc_diff <- am_auc - esm_auc
+
+    ## Paired DeLong test
+
+    auc_p <- tryCatch(
+      roc.test(
+        roc_am,
+        roc_esm,
+        paired = TRUE,
+        method = "delong"
+      )$p.value,
+      error = function(e) NA_real_
+    )
+
+    ## Initialise bootstrap differences
+
+    boot_auc_diff <- rep(NA_real_, B)
+    boot_mcc_diff <- rep(NA_real_, B)
+
+    ## Stratified paired variant-level bootstrap
+
+    for (b in seq_len(B)) {
+
+      sampled_idx <- c(
+        sample(idx_0, length(idx_0), replace = TRUE),
+        sample(idx_1, length(idx_1), replace = TRUE)
+      )
+
+      boot <- analysed[sampled_idx]
+      yb <- boot$clinical_prediction
+
+      ## AUC difference
+
+      boot_auc_diff[b] <- tryCatch({
+
+        auc_am_b <- as.numeric(auc(roc(
+          yb,
+          boot$am_score,
+          levels = c(0, 1),
+          direction = "<",
+          quiet = TRUE
+        )))
+
+        auc_esm_b <- as.numeric(auc(roc(
+          yb,
+          boot$esm1b_score_reversed,
+          levels = c(0, 1),
+          direction = "<",
+          quiet = TRUE
+        )))
+
+        auc_am_b - auc_esm_b
+
+      }, error = function(e) NA_real_)
+
+      ## MCC difference using the same sampled variants
+
+      boot_mcc_diff[b] <- tryCatch(
+        mcc(yb, boot$am_prediction) -
+          mcc(yb, boot$esm1b_prediction),
+        error = function(e) NA_real_
+      )
+    }
+
+    ## 95% percentile bootstrap CIs
+
+    auc_ci <- get_boot_ci(boot_auc_diff)
+
+    auc_diff_ci_lower <- auc_ci[1]
+    auc_diff_ci_upper <- auc_ci[2]
+
+    mcc_ci <- get_boot_ci(boot_mcc_diff)
+
+    mcc_diff_ci_lower <- mcc_ci[1]
+    mcc_diff_ci_upper <- mcc_ci[2]
+  }
+
+  ## Paired Wilcoxon test on normalised scores
+
+  wilcox_cols <- c("am_score", "esm1b_normalized")
+
+  if (all(wilcox_cols %in% names(group_data))) {
+
+    wilcox_data <- group_data[
+      complete.cases(group_data[, ..wilcox_cols])
+    ]
+
+    if (nrow(wilcox_data) > 0) {
+
+      wilcox_p <- tryCatch(
+        wilcox.test(
+          wilcox_data$am_score,
+          wilcox_data$esm1b_normalized,
+          paired = TRUE
+        )$p.value,
+        error = function(e) NA_real_
+      )
+    }
+  }
+
+  ## Return one result row
+
+  data.table(
+    group = group_name,
+
+    protein_count = protein_count,
+    analysed_protein_count = analysed_protein_count,
+
+    total_counts = total_counts,
+    path_counts = path_counts,
+    benign_counts = benign_counts,
+
+    analysed_counts = analysed_counts,
+    analysed_path_counts = analysed_path_counts,
+    analysed_benign_counts = analysed_benign_counts,
+
+    am_auc = am_auc,
+    esm_auc = esm_auc,
+    auc_diff = auc_diff,
+    auc_diff_ci_lower = auc_diff_ci_lower,
+    auc_diff_ci_upper = auc_diff_ci_upper,
+    auc_p = auc_p,
+
+    am_mcc = am_mcc,
+    esm_mcc = esm_mcc,
+    mcc_diff = mcc_diff,
+    mcc_diff_ci_lower = mcc_diff_ci_lower,
+    mcc_diff_ci_upper = mcc_diff_ci_upper,
+
+    wilcox_p = wilcox_p
+  )
+}
+
+```
+
+```{r, overall bootstrap results}
+
+library(data.table)
+library(cvAUC)
+library(mltools)
+library(pROC)
+
+# Convert clinical labels and predictions to numeric values
+convert_prediction <- function(x) {
+  x <- tolower(trimws(as.character(x)))
+  result <- rep(NA_real_, length(x))
+  result[x %in% c("benign", "0")] <- 0
+  result[x %in% c("pathogenic", "1")] <- 1
+  result
+}
+
+data[, clinical_prediction :=
+       convert_prediction(clinical_prediction)]
+
+data[, am_prediction :=
+       convert_prediction(am_prediction)]
+
+data[, esm1b_prediction :=
+       convert_prediction(esm1b_prediction)]
+
+# Run the paired bootstrap analysis on the full dataset
+overall_bootstrap <- analyse_protein_group(
+  group_data = data2,
+  group_name = "Overall",
+  B = 5000
+)
+
+# Convert results to a one-row table
+overall_results <- as.data.table(overall_bootstrap)
+
+# Save results
+output_dir <- "~/alphamissense_analysis/results"
+
+dir.create(
+  output_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+fwrite(
+  overall_results,
+  file.path(output_dir, "overall_am_esm1b_bootstrap_results.csv")
+)
+
+print(overall_results)
+
+```
+
+```{r, analyse gpcr}
+
+library(data.table)
+library(pROC)
+
+set.seed(123)
+B <- 5000
+
+## Read in already calculated GPCR data
+
+gpcr_data <- fread(
+  "~/alphamissense_analysis/gpcr_variants.csv"
+)
+
+## Analyse GPCR variants
+
+gpcr_results <- analyse_protein_group(
+  group_data = gpcr_data,
+  group_name = "GPCR",
+  B = B
+)
+
+## Print results
+
+print(gpcr_results)
+
+## Save results
+
+fwrite(
+  gpcr_results,
+  "~/alphamissense_analysis/results/gpcr_bootstrap_results.csv"
+)
+
+```
+
+```{r, add gene name to data}
+
+id_mapper <- fread("~/alphamissense_analysis/HUMAN_9606_idmapping_selected.tab")
+id_mapper <- id_mapper[,1:2]
+colnames(id_mapper) <- c("uniprot", "gene")
+
+data <- merge(id_mapper, data, by = c("uniprot"))
+disease_set <- merge(id_mapper, disease_set, by = c("uniprot"))
+
+```
+
+```{r, pfam mcc analysis}
+
+library(dplyr)
+library(ggplot2)
+
+# Run through each Pfam id and calculate AUC and MCC
+pfam_mccs <- data.table()
+
+pfam_ids <- unique(data$pfam_id)
+
+for (i in pfam_ids){
+  
+  family <- data[data$pfam_id == i]
+  total_counts <- nrow(family)
+  am_mcc <- mcc(family$clinical_prediction, family$am_prediction)
+  esm_mcc <- mcc(family$clinical_prediction, family$esm1b_prediction)
+  
+  top_row <- family[1,]
+  pfam_name <- top_row$pfam_name
+  pfam_id <- top_row$pfam_id
+  family_name <- top_row$name
+
+  path_counts <- nrow(family[family$clinical_prediction == 1])
+  benign_counts <- nrow(family[family$clinical_prediction == 0])
+  
+  if (path_counts > 0 & benign_counts > 0) {
+    
+    roc_object <- roc(family$clinical_prediction, family$am_score)
+    am_auc <- roc_object$auc
+    am_auc <- as.numeric(paste(am_auc))
+
+    roc_object <- roc(family$clinical_prediction, family$esm1b_score)
+    esm_auc <- roc_object$auc
+    esm_auc <- as.numeric(paste(esm_auc))
+  
+  } else{
+   
+    esm_auc <- NA
+    am_auc <- NA
+    
+  }
+  
+  row <- data.table(family_name, pfam_id, pfam_name, am_auc, esm_auc, am_mcc, esm_mcc, total_counts, path_counts, benign_counts)
+
+  pfam_mccs <- bind_rows(pfam_mccs, row)
+  
+}
+
+# Subset to specific number of minimum variants for each Pfam
+
+pfam_mccs2 <- pfam_mccs[pfam_mccs$total_counts >= 20]
+pfam_mccs2 <- pfam_mccs2[pfam_mccs2$path_counts >= 1]
+pfam_mccs2 <- pfam_mccs2[pfam_mccs2$benign_counts >= 1]
+pfam_mccs2 <- pfam_mccs2[-2,]
+
+# Remove duplicate pfams
+duplicates <- pfam_mccs[duplicated(pfam_mccs$pfam_id) | duplicated(pfam_mccs$pfam_id, fromLast = TRUE), ]
+
+pfam_name <- pfam_mccs2$pfam_name
+pfam_mccs2 <- pfam_mccs2[,-2]
+pfam_mccs2 <- unique(pfam_mccs2)
+
+# AM poor performance
+pfam_less_0.6 <- pfam_mccs2[pfam_mccs2$am_mcc < 0.6]
+pfam_more_0.6 <- pfam_mccs2[pfam_mccs2$am_mcc >= 0.6]
+
+pfam_less_0.6_perc <- nrow(pfam_less_0.6)/nrow(pfam_mccs2)*100
+pfam_more_0.6_perc <- nrow(pfam_more_0.6)/nrow(pfam_mccs2)*100
+
+pfam_less_0.6_mean_counts <- mean(pfam_less_0.6$total_counts)
+pfam_more_0.6_mean_counts <- mean(pfam_more_0.6$total_counts)
+
+## ESM-1b poor performance
+pfam_less_0.6_esm <- pfam_mccs2[pfam_mccs2$esm_mcc < 0.6]
+pfam_more_0.6_esm <- pfam_mccs2[pfam_mccs2$esm_mcc >= 0.6]
+
+pfam_less_0.6_perc_esm <- nrow(pfam_less_0.6_esm)/nrow(pfam_mccs2)*100
+pfam_more_0.6_perc_esm <- nrow(pfam_more_0.6_esm)/nrow(pfam_mccs2)*100
+
+pfam_less_0.6_mean_counts_esm <- mean(pfam_less_0.6_esm$total_counts)
+pfam_more_0.6_mean_counts_esm <- mean(pfam_more_0.6_esm$total_counts)
+
+## AM good performance
+pfam_more_0.9_am <- pfam_mccs2[pfam_mccs2$am_mcc >= 0.9]
+
+pfam_more_0.9_perc_am <- nrow(pfam_more_0.9_am)/nrow(pfam_mccs2)*100
+
+pfam_more_0.9_mean_counts_am <- mean(pfam_more_0.9_am$total_counts)
+
+## ESM good performance
+pfam_more_0.9_esm <- pfam_mccs2[pfam_mccs2$esm_mcc >= 0.9]
+
+pfam_more_0.9_perc_esm <- nrow(pfam_more_0.9_esm)/nrow(pfam_mccs2)*100
+
+pfam_more_0.9_mean_counts_esm <- mean(pfam_more_0.9_esm$total_counts)
+
+## AM vs ESM
+pfam_am_mcc_w <- nrow(pfam_mccs2[pfam_mccs2$am_mcc > pfam_mccs2$esm_mcc])
+pfam_esm_mcc_w <- nrow(pfam_mccs2[pfam_mccs2$esm_mcc > pfam_mccs2$am_mcc])
+pfam_mcc_draw <- nrow(pfam_mccs2[pfam_mccs2$esm_mcc == pfam_mccs2$am_mcc])
+
+## Pie chart of above
+
+pie_data <- data.frame(
+  category = c("AM", "ESM-1b", "Even"),
+  value = c(pfam_am_mcc_w, pfam_esm_mcc_w, pfam_mcc_draw)  # Replace with your actual numbers
+)
+
+total <- sum(pie_data$value)
+label <- pie_data$value/total * 100
+label <- round(label, 2)
+label <- paste0(label, "%")
+
+model_comp_plot <- ggplot(pie_data, aes(x = "", y = value, fill = category)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y") +
+  scale_fill_manual(values = c("AM" = "#48b846", 
+                                "ESM-1b" = "#4959d1", 
+                                "Even" = "grey")) +
+  geom_text(aes(label = label), 
+            position = position_stack(vjust = 0.5), 
+            color = "black") +
+  theme_void() +
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),  # Adjust this value for text size
+    legend.key.size = unit(0.9, "cm")  # Adjust this value for the size of the legend keys
+  )
+
+model_comp_plot
+
+ggsave(filename = "~/alphamissense_analysis/figs/model_perf_comparison.png", plot = model_comp_plot, device = "png", height = 6, width = 9)
+
+## Mean counts
+
+pfam_am_w_meancounts <- mean(pfam_am_mcc_w$total_counts)
+pfam_esm_w_meancounts <- mean(pfam_esm_mcc_w$total_counts)
+pfam_draw_meancounts <- mean(pfam_mcc_draw$total_counts)
+
+## Calculate mean counts of pfams which have am mcc = 1 
+
+equal1 <- pfam_mccs2[pfam_mccs2$am_mcc == 1]
+equal1_meancounts <- mean(equal1$total_counts)
+
+## AM and ESM variance & standard deviation
+
+am_variance <- var(pfam_mccs2$am_mcc)
+am_sd <- sd(pfam_mccs2$am_mcc)
+
+esm_variance <- var(pfam_mccs2$esm_mcc)
+esm_sd <- sd(pfam_mccs2$esm_mcc)
+
+## pfam sup table for paper
+
+pfam_mccs2_table <- pfam_mccs[pfam_mccs$total_counts >= 5]
+pfam_mccs2_table <- pfam_mccs2_table[pfam_mccs2_table$path_counts >= 1]
+pfam_mccs2_table <- pfam_mccs2_table[pfam_mccs2_table$benign_counts >= 1]
+
+pfam_mccs2_table <- pfam_mccs2_table[
+  !grepl("-", tolower(as.character(pfam_id)))
+]
+
+fwrite(pfam_mccs2_table, "~/alphamissense_analysis/sup_data/pfam_results.csv")
+
+
+```
+
+
+```{r, visualise MCC distributions}
+
+library(ggplot2)
+
+pfam_mccs2_filtered_am <- pfam_mccs2[pfam_mccs2$am_mcc >= -0.4,]
+pfam_mccs2_filtered_esm <- pfam_mccs2[pfam_mccs2$esm_mcc >= -0.4,]
+
+pfam_mccs2_filtered_am <- pfam_mccs2_filtered_am[pfam_mccs2_filtered_am$total_counts >= 15,]
+pfam_mccs2_filtered_esm  <- pfam_mccs2_filtered_esm[pfam_mccs2_filtered_esm$total_counts >= 15,]
+
+am_mcc_dist <- ggplot(pfam_mccs2_filtered_am, aes(x = am_mcc)) +
+  geom_histogram(fill = "#48b846", color = "black", bins = 40, boundary = 1) +
+  geom_vline(xintercept = c(0.6, 0.9), linetype = "dashed", color = "red") +
+  scale_x_continuous(breaks = seq(-0.4, 1, by = 0.1)) +
+  labs(x = "MCC",
+       y = "Protein families") +
+  theme(
+    panel.background = element_rect(fill = "white"), # Set background to white
+    panel.grid.major = element_blank(),               # Remove major grid lines
+    panel.grid.minor = element_blank(),               # Remove minor grid lines
+    axis.line = element_line(color = "black")         # Optional: add axis lines
+  )
+am_mcc_dist
+
+ggsave(filename = "~/alphamissense_analysis/figs/MCC_dist_AM.tif", plot = am_mcc_dist, device = "tiff", height = 6, width = 8)
+
+esm_mcc_dist <- ggplot(pfam_mccs2_filtered_am, aes(x = esm_mcc)) +
+  geom_histogram(fill = "#4959d1", color = "black", bins = 40, boundary = 1) +
+  geom_vline(xintercept = c(0.6, 0.9), linetype = "dashed", color = "red") +
+  scale_x_continuous(breaks = seq(-0.4, 1, by = 0.1)) +
+  labs(x = "MCC",
+       y = "Protein families") +
+  theme(
+    panel.background = element_rect(fill = "white"), # Set background to white
+    panel.grid.major = element_blank(),               # Remove major grid lines
+    panel.grid.minor = element_blank(),               # Remove minor grid lines
+    axis.line = element_line(color = "black")         # Optional: add axis lines
+  )
+esm_mcc_dist
+
+
+ggsave(filename = "~/alphamissense_analysis/figs/MCC_dist_ESM.tif", plot = esm_mcc_dist, device = "tiff", height = 6, width = 8)
+
+```
+
+```{r, protein mcc analysis}
+
+library(dplyr)
+
+# Run through each protein and calculate AUC and MCC
+
+protein_mccs <- data.table()
+
+proteins <- unique(data$uniprot)
+
+for (i in proteins){
+  
+  protein <- data[data$uniprot == i]
+  total_counts <- nrow(protein)
+  am_mcc <- mcc(protein$clinical_prediction, protein$am_prediction)
+  esm_mcc <- mcc(protein$clinical_prediction, protein$esm1b_prediction)
+  
+  top_row <- protein[1,]
+  uniprot <- top_row$uniprot
+
+  path_counts <- nrow(protein[protein$clinical_prediction == 1])
+  benign_counts <- nrow(protein[protein$clinical_prediction == 0])  
+
+  if (path_counts > 0 & benign_counts > 0) {
+    
+    roc_object <- roc(protein$clinical_prediction, protein$am_score)
+    am_auc <- roc_object$auc
+    am_auc <- as.numeric(paste(am_auc))
+
+    roc_object <- roc(protein$clinical_prediction, protein$esm1b_score)
+    esm_auc <- roc_object$auc
+    esm_auc <- as.numeric(paste(esm_auc))
+  
+  } else{
+   
+    esm_auc <- NA
+    am_auc <- NA
+    
+  }
+  row <- data.table(uniprot, am_auc, esm_auc, am_mcc, esm_mcc, total_counts, path_counts, benign_counts)
+
+  protein_mccs <- bind_rows(protein_mccs, row)
+  
+}
+
+# Filter proteins with specific number of variants
+protein_mccs2 <- protein_mccs[protein_mccs$total_counts >= 5]
+protein_mccs2 <- protein_mccs2[protein_mccs2$path_counts > 1]
+protein_mccs2 <- protein_mccs2[protein_mccs2$benign_counts > 1]
+
+# Calculate mean am_mcc mean
+overall_am_mean_protein_mccs <- mean(protein_mccs2$am_mcc)
+
+# Calculate counts of proteins with greater pathogenic or benign variant counts
+protein_mccs_patho <- protein_mccs2[protein_mccs2$path_counts > protein_mccs2$benign_counts]
+protein_mccs_benign <- protein_mccs2[protein_mccs2$benign_counts > protein_mccs2$path_counts]
+protein_mccs_equal <- protein_mccs2[protein_mccs2$benign_counts == protein_mccs2$path_counts]
+
+patho_proteins <- protein_mccs_patho$uniprot
+benign_proteins <- protein_mccs_benign$uniprot
+
+patho_protein_data <- data[data$uniprot %in% patho_proteins]
+benign_protein_data <- data[data$uniprot %in% benign_proteins]
+
+patho_protein_mcc <- mcc(patho_protein_data$clinical_prediction, patho_protein_data$am_prediction)
+benign_protein_mcc <- mcc(benign_protein_data$clinical_prediction, benign_protein_data$am_prediction)
+
+## protein sup table for paper
+
+id_mapper <- fread("~/alphamissense_analysis/HUMAN_9606_idmapping_selected.tab")
+id_mapper <- id_mapper[,1:2]
+colnames(id_mapper) <- c("uniprot", "gene")
+
+protein_mccs2_table <- merge(id_mapper, protein_mccs2, by = c("uniprot"))
+protein_mccs2_table[, gene := sub("_HUMAN", "", gene)]
+
+
+fwrite(protein_mccs2_table, "~/alphamissense_analysis/sup_data/protein_results.csv")
+  
+```
+
+```{r, disease set analysis}
+
+disease_set$clinical_prediction <- gsub("benign", x = disease_set$clinical_prediction, replacement = 0)
+disease_set$clinical_prediction <- gsub("pathogenic", x = disease_set$clinical_prediction, replacement = 1)
+disease_set$clinical_prediction <- as.numeric(disease_set$clinical_prediction)
+disease_set$am_prediction <- gsub("benign", x = disease_set$am_prediction, replacement = "0")
+disease_set$am_prediction <- gsub("pathogenic", x = disease_set$am_prediction, replacement = "1")
+disease_set$am_prediction <- as.numeric(disease_set$am_prediction)
+disease_set$esm1b_prediction <- gsub("benign", x = disease_set$esm1b_prediction, replacement = 0)
+disease_set$esm1b_prediction <- gsub("pathogenic", x = disease_set$esm1b_prediction, replacement = 1)
+disease_set$esm1b_prediction <- as.numeric(disease_set$esm1b_prediction)
+
+# Run through each disease in ClinVar and calculate AUC and MCC for each
+
+disease_mccs <- data.table()
+
+diseases <- unique(disease_set$PhenotypeList)
+
+for (i in diseases){
+  
+  disease <- disease_set[disease_set$PhenotypeList == i]
+  total_counts <- nrow(disease)
+  am_mcc <- mcc(disease$clinical_prediction, disease$am_prediction)
+  esm_mcc <- mcc(disease$clinical_prediction, disease$esm1b_prediction)
+  
+  top_row <- disease[1,]
+  disease_name <- top_row$PhenotypeList
+
+  path_counts <- nrow(disease[disease$clinical_prediction == 1])
+  benign_counts <- nrow(disease[disease$clinical_prediction == 0])  
+
+  if (path_counts > 0 & benign_counts > 0) {
+    
+    roc_object <- roc(disease$clinical_prediction, disease$am_score)
+    am_auc <- roc_object$auc
+    am_auc <- as.numeric(paste(am_auc))
+
+    roc_object <- roc(disease$clinical_prediction, disease$esm1b_score)
+    esm_auc <- roc_object$auc
+    esm_auc <- as.numeric(paste(esm_auc))
+  
+  } else{
+   
+    esm_auc <- NA
+    am_auc <- NA
+    
+  }
+  row <- data.table(disease_name, am_auc, esm_auc, am_mcc, esm_mcc, total_counts, path_counts, benign_counts)
+
+  disease_mccs <- bind_rows(disease_mccs, row)
+  
+}
+
+# Filter diseases for specific amount of variants
+
+disease_mccs2 <- disease_mccs[disease_mccs$total_counts > 4]
+disease_mccs2 <- disease_mccs2[disease_mccs2$path_counts > 1]
+disease_mccs2 <- disease_mccs2[disease_mccs2$benign_counts > 1]
+
+overall_am_mean_disease_mccs <- mean(disease_mccs2$am_mcc)
+
+disease_mccs_patho <- disease_mccs2[disease_mccs2$path_counts > disease_mccs2$benign_counts]
+disease_mccs_benign <- disease_mccs2[disease_mccs2$benign_counts > disease_mccs2$path_counts]
+disease_mccs_equal <- disease_mccs2[disease_mccs2$benign_counts == disease_mccs2$path_counts]
+
+patho_disease <- disease_mccs_patho$uniprot
+benign_disease <- disease_mccs_benign$uniprot
+
+patho_disease_data <- disease_set[disease_set$uniprot %in% patho_disease]
+benign_disease_data <- disease_set[disease_set$uniprot %in% benign_disease]
+
+patho_disease_mcc <- mcc(patho_disease_data$clinical_prediction, patho_disease_data$am_prediction)
+benign_disease_mcc <- mcc(benign_disease_data$clinical_prediction, benign_disease_data$am_prediction)
+
+## disease sup table for paper
+
+disease_mccs2_table <- disease_mccs2[!grepl("\\|", as.character(disease_name))]
+disease_mccs2_table <- disease_mccs2_table[
+  !grepl("\\||not provided|not specified|see cases|inborn genetic diseases", tolower(as.character(disease_name)))
+]
+
+fwrite(disease_mccs2_table, "~/am_comparison_project/alphamissense_analysis/sup_data/disease_results.csv")
+
+```
+
+```{r, analyse by variant origin}
+
+library(data.table)
+library(pROC)
+
+set.seed(123)
+B <- 5000
+
+## Initialise results table
+
+origin_mccs <- data.table()
+
+## Get unique Origins
+
+origins <- unique(disease_set$Origin)
+
+## Analyse each Origin
+
+for (i in origins) {
+
+  ## Subset data for current Origin
+
+  origin <- disease_set[Origin == i]
+
+  ## Run analysis function
+
+  origin_results <- analyse_protein_group(
+    group_data = origin,
+    group_name = i,
+    B = B
+  )
+
+  ## Append results
+
+  origin_mccs <- rbind(
+    origin_mccs,
+    origin_results,
+    fill = TRUE
+  )
+}
+
+## Save results
+
+fwrite(
+  origin_mccs,
+  "~/alphamissense_analysis/results/origin_bootstrap_results.csv"
+)
+
+## Print results
+
+print(origin_mccs)
+
+```
+
+```{r, analyse by review status}
+
+library(data.table)
+library(pROC)
+
+set.seed(123)
+B <- 5000
+
+## Initialise results table
+
+review_mccs <- data.table()
+
+## Get unique ReviewStatus values, including NA
+
+reviews <- unique(disease_set$ReviewStatus)
+
+## Analyse each ReviewStatus group
+
+for (i in reviews) {
+
+  ## Extract review-status group, including NA
+
+  if (is.na(i)) {
+
+    review_all <- disease_set[is.na(ReviewStatus)]
+    review_name <- "NA"
+
+  } else {
+
+    review_all <- disease_set[ReviewStatus == i]
+    review_name <- as.character(i)
+  }
+
+  ## Run analysis function
+
+  review_results <- analyse_protein_group(
+    group_data = review_all,
+    group_name = review_name,
+    B = B
+  )
+
+  ## Append results
+
+  review_mccs <- rbind(
+    review_mccs,
+    review_results,
+    fill = TRUE
+  )
+}
+
+## Save results
+
+fwrite(
+  review_mccs,
+  "~/alphamissense_analysis/results/review_status_bootstrap_results.csv"
+)
+
+## Print results
+
+print(review_mccs)
+
+```
+
+```{r, cancer analysis}
+
+cancer_analysis1 <- disease_set[grep("cancer", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis2 <- disease_set[grep("neoplasm", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis3 <- disease_set[grep("carcinoma", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis4 <- disease_set[grep("melanoma", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis5 <- disease_set[grep("blastoma", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis6 <- disease_set[grep("sarcoma", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis7 <- disease_set[grep("leukemia", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis8 <- disease_set[grep("Lymphoma", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis9 <- disease_set[grep("Myeloma", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis10 <- disease_set[grep("Carcinoid", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis11 <- disease_set[grep("Glioma", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis12 <- disease_set[grep("Adenocarcinoma", disease_set$PhenotypeList, ignore.case = T)]
+cancer_analysis13 <- disease_set[grep("Tumor", disease_set$PhenotypeList, ignore.case = T)]
+
+cancer_analysis <- rbind(cancer_analysis1, cancer_analysis2)
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis3))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis4))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis5))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis6))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis7))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis8))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis9))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis10))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis11))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis12))
+cancer_analysis <- unique(rbind(cancer_analysis, cancer_analysis13))
+
+## analysis with everything
+
+cancer_protein_list <- unique(cancer_analysis$uniprot)
+cancer_protein_counts <- length(cancer_protein_list)
+
+# Cancer analysis
+cancer_results <- analyse_protein_group(
+  group_data = cancer_analysis,
+  group_name = "Cancer",
+  B = 5000
+)
+
+# Save results
+fwrite(
+  cancer_results,
+  "~/alphamissense_analysis/results/cancer_bootstrap_results.csv"
+)
+
+## Remove hereditary predisposing
+
+library(data.table)
+
+# 1. Cancer 2 analysis (non-exclusive)
+cancer2_analysis <- cancer_analysis[
+  !grepl("predisposing", cancer_analysis$PhenotypeList, ignore.case = TRUE)
+]
+
+cancer2_results <- analyse_protein_group(
+  group_data = cancer2_analysis,
+  group_name = "Cancer excluding predisposing phenotypes",
+  B = 5000
+)
+
+# 2. Cancer 2 analysis (exclusive: additionally exclude rows containing "|")
+cancer2_excl_analysis <- cancer_analysis[
+  !grepl("predisposing", cancer_analysis$PhenotypeList, ignore.case = TRUE) &
+    !grepl("|", cancer_analysis$PhenotypeList, fixed = TRUE)
+]
+
+cancer2_excl_results <- analyse_protein_group(
+  group_data = cancer2_excl_analysis,
+  group_name = "Cancer excluding predisposing and multiple phenotypes",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  cancer2_results,
+  paste0(results_dir, "cancer2_bootstrap_results.csv")
+)
+
+fwrite(
+  cancer2_excl_results,
+  paste0(results_dir, "cancer2_excl_bootstrap_results.csv")
+)
+
+## choose somatic mutations
+
+cancer3_analysis <- cancer_analysis[cancer_analysis$Origin == "somatic"]
+
+cancer3_protein_list <- unique(cancer3_analysis$uniprot)
+cancer3_protein_counts <- length(cancer3_protein_list)
+
+cancer3_am_mcc <- mccr(cancer3_analysis$clinical_prediction, cancer3_analysis$am_prediction)
+cancer3_esm_mcc <- mccr(cancer3_analysis$clinical_prediction, cancer3_analysis$esm1b_prediction)
+
+roc_object <- roc(cancer3_analysis$clinical_prediction, cancer3_analysis$am_score)
+cancer3_am_auc <- roc_object$auc
+
+cancer3_am_auc <- as.numeric(paste(cancer3_am_auc))
+
+roc_object <- roc(cancer3_analysis$clinical_prediction, cancer3_analysis$esm1b_score)
+cancer3_esm_auc <- roc_object$auc
+
+cancer3_esm_auc <- as.numeric(paste(cancer3_esm_auc))
+
+cancer3_benign_counts <- nrow(cancer3_analysis[cancer3_analysis$clinical_prediction == 0])
+cancer3_patho_counts <- nrow(cancer3_analysis[cancer3_analysis$clinical_prediction == 1])
+
+wilcox.test(cancer3_analysis$am_score, cancer3_analysis$esm1b_normalized, paired = TRUE)
+
+```
+
+```{r, heriditary predisposing}
+
+library(data.table)
+
+# 1. Hereditary cancer-predisposing syndrome (non-exclusive)
+hereditary_cancer_predisposing_analysis <- cancer_analysis[
+  grepl(
+    "Hereditary cancer-predisposing syndrome",
+    cancer_analysis$PhenotypeList,
+    ignore.case = TRUE
+  ),
+]
+
+hereditary_cancer_predisposing_results <- analyse_protein_group(
+  group_data = hereditary_cancer_predisposing_analysis,
+  group_name = "Hereditary cancer-predisposing syndrome",
+  B = 5000
+)
+
+# 2. Hereditary cancer-predisposing syndrome (exclusive)
+# Exclude rows containing "|"
+hereditary_cancer_predisposing_excl_analysis <- cancer_analysis[
+  grepl(
+    "Hereditary cancer-predisposing syndrome",
+    cancer_analysis$PhenotypeList,
+    ignore.case = TRUE
+  ) &
+    !grepl("|", cancer_analysis$PhenotypeList, fixed = TRUE),
+]
+
+hereditary_cancer_predisposing_excl_results <- analyse_protein_group(
+  group_data = hereditary_cancer_predisposing_excl_analysis,
+  group_name = "Hereditary cancer-predisposing syndrome (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/am_comparison_project/alphamissense_analysis/results/"
+
+fwrite(
+  hereditary_cancer_predisposing_results,
+  paste0(results_dir, "hereditary_cancer_predisposing_bootstrap_results.csv")
+)
+
+fwrite(
+  hereditary_cancer_predisposing_excl_results,
+  paste0(results_dir, "hereditary_cancer_predisposing_excl_bootstrap_results.csv")
+)
+
+```
+
+
+```{r, oncogenic analysis}
+
+library(data.table)
+
+# Load oncogene dataset
+oncogenes <- fread(
+  "~/alphamissense_analysis/protein_groupings/proto_onco.csv",
+  header = FALSE
+)
+
+oncogenes <- cancer_analysis[cancer_analysis$uniprot %in% oncogenes$V1]
+
+# 1. Oncogenes (non-exclusive)
+oncogenes_results <- analyse_protein_group(
+  group_data = oncogenes,
+  group_name = "Oncogenes",
+  B = 5000
+)
+
+# 3. Save results in the same directory as the other analyses
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  oncogenes_results,
+  paste0(results_dir, "oncogenes_bootstrap_results.csv")
+)
+
+```
+
+```{r, somatic cancer variants}
+
+# Load cancer analysis data and subset to somatic variants
+cancer3_analysis <- cancer_analysis[
+  cancer_analysis$Origin == "somatic",
+]
+
+# 1. Somatic cancer variants (non-exclusive)
+cancer3_results <- analyse_protein_group(
+  group_data = cancer3_analysis,
+  group_name = "Somatic cancer",
+  B = 5000
+)
+
+# 2. Somatic cancer variants (exclusive)
+# Exclude rows whose PhenotypeList contains "|"
+cancer3_excl_analysis <- cancer3_analysis[
+  !grepl("|", cancer3_analysis$PhenotypeList, fixed = TRUE),
+]
+
+cancer3_excl_results <- analyse_protein_group(
+  group_data = cancer3_excl_analysis,
+  group_name = "Somatic cancer (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results in the same directory as the other analyses
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  cancer3_results,
+  paste0(results_dir, "somatic_cancer_bootstrap_results.csv")
+)
+
+fwrite(
+  cancer3_excl_results,
+  paste0(results_dir, "somatic_cancer_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, ovarian cancer}
+
+# 1. Ovarian cancer (non-exclusive)
+ovarian_analysis <- disease_set[
+  grepl("Ovarian cancer", disease_set$PhenotypeList, ignore.case = TRUE),
+]
+
+ovarian_results <- analyse_protein_group(
+  group_data = ovarian_analysis,
+  group_name = "Ovarian cancer",
+  B = 5000
+)
+
+# 2. Ovarian cancer (exclusive)
+# Exclude rows whose PhenotypeList contains "|"
+ovarian_excl_analysis <- disease_set[
+  grepl("Ovarian cancer", disease_set$PhenotypeList, ignore.case = TRUE) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE),
+]
+
+ovarian_excl_results <- analyse_protein_group(
+  group_data = ovarian_excl_analysis,
+  group_name = "Ovarian cancer (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  ovarian_results,
+  paste0(results_dir, "ovarian_cancer_bootstrap_results.csv")
+)
+
+fwrite(
+  ovarian_excl_results,
+  paste0(results_dir, "ovarian_cancer_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, Retinoblastoma}
+
+library(data.table)
+
+# 1. Retinoblastoma (non-exclusive)
+retinoblastoma_analysis <- cancer_analysis[
+  grepl(
+    "Retinoblastoma",
+    cancer_analysis$PhenotypeList,
+    ignore.case = TRUE
+  ),
+]
+
+retinoblastoma_results <- analyse_protein_group(
+  group_data = retinoblastoma_analysis,
+  group_name = "Retinoblastoma",
+  B = 5000
+)
+
+# 2. Retinoblastoma (exclusive)
+# Exclude rows containing "|"
+retinoblastoma_excl_analysis <- cancer_analysis[
+  grepl(
+    "Retinoblastoma",
+    cancer_analysis$PhenotypeList,
+    ignore.case = TRUE
+  ) &
+    !grepl("|", cancer_analysis$PhenotypeList, fixed = TRUE),
+]
+
+retinoblastoma_excl_results <- analyse_protein_group(
+  group_data = retinoblastoma_excl_analysis,
+  group_name = "Retinoblastoma (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  retinoblastoma_results,
+  paste0(results_dir, "retinoblastoma_bootstrap_results.csv")
+)
+
+fwrite(
+  retinoblastoma_excl_results,
+  paste0(results_dir, "retinoblastoma_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, acute myeloid leukemia}
+
+library(data.table)
+
+# 1. Acute myeloid leukemia (non-exclusive)
+acute_myeloid_leukemia_analysis <- cancer_analysis[
+  grepl(
+    "Acute myeloid leukemia",
+    cancer_analysis$PhenotypeList,
+    ignore.case = TRUE
+  ),
+]
+
+acute_myeloid_leukemia_results <- analyse_protein_group(
+  group_data = acute_myeloid_leukemia_analysis,
+  group_name = "Acute myeloid leukemia",
+  B = 5000
+)
+
+# 2. Acute myeloid leukemia (exclusive)
+# Exclude rows containing "|"
+acute_myeloid_leukemia_excl_analysis <- cancer_analysis[
+  grepl(
+    "Acute myeloid leukemia",
+    cancer_analysis$PhenotypeList,
+    ignore.case = TRUE
+  ) &
+    !grepl("|", cancer_analysis$PhenotypeList, fixed = TRUE),
+]
+
+acute_myeloid_leukemia_excl_analysis <- acute_myeloid_leukemia_excl_analysis[
+  grepl(
+    "Acute myeloid leukemia",
+    acute_myeloid_leukemia_excl_analysis$PhenotypeList,
+    ignore.case = TRUE
+  ) &
+    !grepl(";", acute_myeloid_leukemia_excl_analysis$PhenotypeList, fixed = TRUE),
+]
+
+acute_myeloid_leukemia_excl_results <- analyse_protein_group(
+  group_data = acute_myeloid_leukemia_excl_analysis,
+  group_name = "Acute myeloid leukemia (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  acute_myeloid_leukemia_results,
+  paste0(results_dir, "acute_myeloid_leukemia_bootstrap_results.csv")
+)
+
+fwrite(
+  acute_myeloid_leukemia_excl_results,
+  paste0(results_dir, "acute_myeloid_leukemia_excl_bootstrap_results.csv")
+)
+
+```
+
+
+
+```{r, diabetes}
+
+library(data.table)
+
+# --------------------------------------------------
+# 1. Monogenic diabetes
+# --------------------------------------------------
+
+monodiabetes_analysis <- disease_set[
+  grep("Monogenic diabetes", PhenotypeList)
+]
+
+# Proportion of variants associated with UniProt P35557
+P35557_count <- nrow(
+  monodiabetes_analysis[uniprot == "P35557"]
+)
+
+P35557_perc <- P35557_count / nrow(monodiabetes_analysis)
+
+# Run analysis
+monodiabetes_results <- analyse_protein_group(
+  group_data = monodiabetes_analysis,
+  group_name = "Monogenic diabetes",
+  B = 5000
+)
+
+
+# --------------------------------------------------
+# 2. Maturity-onset diabetes of the young
+# --------------------------------------------------
+
+onsetdiabetes_analysis <- disease_set[
+  grep("Maturity onset diabetes mellitus in young", PhenotypeList)
+]
+
+# Exclude entries containing a pipe character
+onsetdiabetes_analysis <- onsetdiabetes_analysis[
+  !grepl("[|;]", PhenotypeList)
+]
+
+onsetdiabetes_protein_list <- unique(onsetdiabetes_analysis$uniprot)
+onsetdiabetes_protein_count <- length(onsetdiabetes_protein_list)
+
+# Run analysis
+onsetdiabetes_results <- analyse_protein_group(
+  group_data = onsetdiabetes_analysis,
+  group_name = "Maturity-onset diabetes (general)",
+  B = 5000
+)
+
+
+# --------------------------------------------------
+# 3. Maturity-onset diabetes of the young type 2
+# --------------------------------------------------
+
+onsetdiabetes2_analysis <- disease_set[
+  grep("Maturity-onset diabetes of the young type 2", PhenotypeList)
+]
+
+onsetdiabetes2_protein_list <- unique(onsetdiabetes2_analysis$uniprot)
+onsetdiabetes2_protein_count <- length(onsetdiabetes2_protein_list)
+
+# Run analysis
+onsetdiabetes2_results <- analyse_protein_group(
+  group_data = onsetdiabetes2_analysis,
+  group_name = "Maturity-onset diabetes type 2",
+  B = 5000
+)
+
+
+# --------------------------------------------------
+# Combine results
+# --------------------------------------------------
+
+diabetes_results <- rbindlist(
+  list(
+    monodiabetes_results,
+    onsetdiabetes_results,
+    onsetdiabetes2_results
+  ),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+# Display results
+print(diabetes_results)
+
+# Save results
+fwrite(
+  diabetes_results,
+  "~/alphamissense_analysis/results/diabetes_phenotype_bootstrap_results.csv"
+)
+
+## Percentage of variant from hexokinase 4
+
+onsetdiabetes_hexo4_count <- nrow(onsetdiabetes_analysis[onsetdiabetes_analysis$uniprot == "P35557"])
+onsetdiabetes_hexo4_perc <- onsetdiabetes_hexo4_count/nrow(onsetdiabetes_analysis)
+
+library(data.table)
+
+# --------------------------------------------------
+# 1. Hexokinase 4: monogenic diabetes
+# --------------------------------------------------
+
+monodiabetes_hexo4 <- monodiabetes_analysis[
+  monodiabetes_analysis$uniprot == "P35557"
+]
+
+monodiabetes_hexo4_results <- analyse_protein_group(
+  group_data = monodiabetes_hexo4,
+  group_name = "Hexokinase 4: monogenic diabetes",
+  B = 5000
+)
+
+
+# --------------------------------------------------
+# 2. Hexokinase 4: maturity-onset diabetes
+# Combine type 1 and type 2 phenotype subsets
+# --------------------------------------------------
+
+onsetdiabetes_hexo4 <- onsetdiabetes_analysis[
+  onsetdiabetes_analysis$uniprot == "P35557"
+]
+
+onsetdiabetes_hexo4_2 <- onsetdiabetes2_analysis[
+  onsetdiabetes2_analysis$uniprot == "P35557"
+]
+
+onsetdiabetes_hexo4 <- rbindlist(
+  list(onsetdiabetes_hexo4, onsetdiabetes_hexo4_2),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+# Remove duplicate rows
+onsetdiabetes_hexo4 <- unique(onsetdiabetes_hexo4)
+
+onsetdiabetes_hexo4_results <- analyse_protein_group(
+  group_data = onsetdiabetes_hexo4,
+  group_name = "Hexokinase 4: maturity-onset diabetes",
+  B = 5000
+)
+
+
+# --------------------------------------------------
+# 3. Combine results
+# --------------------------------------------------
+
+hexo4_results <- rbindlist(
+  list(
+    monodiabetes_hexo4_results,
+    onsetdiabetes_hexo4_results
+  ),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+# Display results
+print(hexo4_results)
+
+# Save results
+fwrite(
+  hexo4_results,
+  "~/alphamissense_analysis/results/hexokinase4_diabetes_bootstrap_results.csv"
+)
+
+## assess overlap between mody, mody2 and monodiabetes
+
+mody_overlap <- merge(monodiabetes_analysis, onsetdiabetes2_analysis, by = colnames(onsetdiabetes_analysis)) 
+# Assuming same column names 
+overlap_count <- nrow(mody_overlap) 
+# Calculate percentage 
+total_rows <- nrow(monodiabetes_analysis) 
+mody_mono_percentage_overlap <- (overlap_count / total_rows) * 100 
+# Output the percentage 
+mody_mono_percentage_overlap
+
+mody_overlap <- merge(onsetdiabetes_analysis, onsetdiabetes2_analysis, by = colnames(onsetdiabetes_analysis)) 
+# Assuming same column names 
+overlap_count <- nrow(mody_overlap) 
+# Calculate percentage 
+total_rows <- nrow(monodiabetes_analysis) 
+percentage_overlap <- (overlap_count / total_rows) * 100 
+# Output the percentage 
+percentage_overlap
+
+## Neonatal diabetes mellitus
+
+neonataldiabetes_analysis <- disease_set[grep(x = disease_set$PhenotypeList, pattern = "Neonatal diabetes mellitus")]
+neonataldiabetes_benign_counts <- nrow(neonataldiabetes_analysis[neonataldiabetes_analysis$clinical_prediction == 0])
+neonataldiabetes_patho_counts <- nrow(neonataldiabetes_analysis[neonataldiabetes_analysis$clinical_prediction == 1])
+
+## calculate accuracy
+
+am_correct_counts <- nrow(neonataldiabetes_analysis[neonataldiabetes_analysis$am_prediction == neonataldiabetes_analysis$clinical_prediction,])
+am_total_counts <- nrow(neonataldiabetes_analysis)
+neonatal_am_accuracy <- am_correct_counts/am_total_counts*100
+
+esm_correct_counts <- nrow(neonataldiabetes_analysis[neonataldiabetes_analysis$esm1b_prediction == neonataldiabetes_analysis$clinical_prediction,])
+esm_total_counts <- nrow(neonataldiabetes_analysis)
+neonatal_esm_accuracy <- esm_correct_counts/esm_total_counts*100
+
+```
+
+```{r, assess the number of muts variants in hereditary nonpolyposis set}
+
+am_muts_uniprots <- unique(am_muts_analysis$uniprot)
+
+hncn_analysis <- disease_set[grep(x = disease_set$PhenotypeList, pattern = "Hereditary nonpolyposis colorectal neoplasms", ignore.case = F)]
+
+hncn_muts_analysis <- hncn_analysis[hncn_analysis$uniprot %in% am_muts_uniprots]
+
+hncn_analysis2 <-  disease_set[disease_set$PhenotypeList == "Hereditary nonpolyposis colorectal neoplasms"]
+
+hncn_muts_analysis2 <- hncn_analysis2[hncn_analysis2$uniprot %in% am_muts_uniprots]
+
+```
+
+```{r, disease bootstraps}
+
+library(data.table)
+
+# 1. Early infantile epileptic encephalopathy with suppression bursts
+# Case-sensitive search
+eieesb_analysis <- disease_set[
+  grep(
+    x = disease_set$PhenotypeList,
+    pattern = "Early infantile epileptic encephalopathy with suppression bursts",
+    ignore.case = FALSE
+  )
+]
+
+eieesb_results <- analyse_protein_group(
+  group_data = eieesb_analysis,
+  group_name = "Early infantile epileptic encephalopathy with suppression bursts",
+  B = 5000
+)
+
+# 2. Early infantile epileptic encephalopathy with suppression bursts
+# Case-sensitive search, excluding rows containing "|"
+eieesb_excl_analysis <- disease_set[
+  grepl(
+    "Early infantile epileptic encephalopathy with suppression bursts",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+eieesb_excl_results <- analyse_protein_group(
+  group_data = eieesb_excl_analysis,
+  group_name = "Early infantile epileptic encephalopathy with suppression bursts (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+fwrite(
+  eieesb_results,
+  "~/alphamissense_analysis/results/eieesb_bootstrap_results.csv"
+)
+
+fwrite(
+  eieesb_excl_results,
+  "~/alphamissense_analysis/results/eieesb_excl_bootstrap_results.csv"
+)
+
+results_dir <- "~/alphamissense_analysis/results/"
+
+# 1. Epileptic encephalopathy
+
+epileptic_encephalopathy_analysis <- disease_set[
+  grepl(
+    "Epileptic encephalopathy",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  )
+]
+
+epileptic_encephalopathy_results <- analyse_protein_group(
+  group_data = epileptic_encephalopathy_analysis,
+  group_name = "Epileptic encephalopathy",
+  B = 5000
+)
+
+epileptic_encephalopathy_excl_analysis <- disease_set[
+  grepl(
+    "Epileptic encephalopathy",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+
+epileptic_encephalopathy_excl_results <- analyse_protein_group(
+  group_data = epileptic_encephalopathy_excl_analysis,
+  group_name = "Epileptic encephalopathy (excluding multiple phenotypes)",
+  B = 5000
+)
+
+
+# 2. Severe myoclonic epilepsy in infancy
+
+smei_analysis <- disease_set[
+  grepl(
+    "Severe myoclonic epilepsy in infancy",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  )
+]
+
+smei_results <- analyse_protein_group(
+  group_data = smei_analysis,
+  group_name = "Severe myoclonic epilepsy in infancy",
+  B = 5000
+)
+
+smei_excl_analysis <- disease_set[
+  grepl(
+    "Severe myoclonic epilepsy in infancy",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+
+smei_excl_results <- analyse_protein_group(
+  group_data = smei_excl_analysis,
+  group_name = "Severe myoclonic epilepsy in infancy (excluding multiple phenotypes)",
+  B = 5000
+)
+
+
+# 3. Myoclonic-atonic epilepsy
+
+myoclonic_atonic_analysis <- disease_set[
+  grepl(
+    "Myoclonic-atonic epilepsy",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  )
+]
+
+myoclonic_atonic_results <- analyse_protein_group(
+  group_data = myoclonic_atonic_analysis,
+  group_name = "Myoclonic-atonic epilepsy",
+  B = 5000
+)
+
+myoclonic_atonic_excl_analysis <- disease_set[
+  grepl(
+    "Myoclonic-atonic epilepsy",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+
+myoclonic_atonic_excl_results <- analyse_protein_group(
+  group_data = myoclonic_atonic_excl_analysis,
+  group_name = "Myoclonic-atonic epilepsy (excluding multiple phenotypes)",
+  B = 5000
+)
+
+
+# 4. Anemia, nonspherocytic hemolytic, due to G6PD deficiency
+
+g6pd_anemia_analysis <- disease_set[
+  grepl(
+    "Anemia, nonspherocytic hemolytic, due to G6PD deficiency",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  )
+]
+
+g6pd_anemia_results <- analyse_protein_group(
+  group_data = g6pd_anemia_analysis,
+  group_name = "Anemia, nonspherocytic hemolytic, due to G6PD deficiency",
+  B = 5000
+)
+
+g6pd_anemia_excl_analysis <- disease_set[
+  grepl(
+    "Anemia, nonspherocytic hemolytic, due to G6PD deficiency",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+
+g6pd_anemia_excl_results <- analyse_protein_group(
+  group_data = g6pd_anemia_excl_analysis,
+  group_name = "Anemia, nonspherocytic hemolytic, due to G6PD deficiency (excluding multiple phenotypes)",
+  B = 5000
+)
+
+
+# 5. Save all results separately
+
+fwrite(
+  epileptic_encephalopathy_results,
+  paste0(results_dir, "epileptic_encephalopathy_bootstrap_results.csv")
+)
+
+fwrite(
+  epileptic_encephalopathy_excl_results,
+  paste0(results_dir, "epileptic_encephalopathy_excl_bootstrap_results.csv")
+)
+
+fwrite(
+  smei_results,
+  paste0(results_dir, "smei_bootstrap_results.csv")
+)
+
+fwrite(
+  smei_excl_results,
+  paste0(results_dir, "smei_excl_bootstrap_results.csv")
+)
+
+fwrite(
+  myoclonic_atonic_results,
+  paste0(results_dir, "myoclonic_atonic_bootstrap_results.csv")
+)
+
+fwrite(
+  myoclonic_atonic_excl_results,
+  paste0(results_dir, "myoclonic_atonic_excl_bootstrap_results.csv")
+)
+
+fwrite(
+  g6pd_anemia_results,
+  paste0(results_dir, "g6pd_anemia_bootstrap_results.csv")
+)
+
+fwrite(
+  g6pd_anemia_excl_results,
+  paste0(results_dir, "g6pd_anemia_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, Tuberous sclerosis 2}
+
+library(data.table)
+
+# 1. Tuberous sclerosis 2 (non-exclusive)
+tuberous_sclerosis2_analysis <- disease_set[
+  grepl(
+    "Tuberous sclerosis 2",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  )
+]
+
+tuberous_sclerosis2_results <- analyse_protein_group(
+  group_data = tuberous_sclerosis2_analysis,
+  group_name = "Tuberous sclerosis 2",
+  B = 5000
+)
+
+# 2. Tuberous sclerosis 2 (exclusive: exclude rows containing "|")
+tuberous_sclerosis2_excl_analysis <- disease_set[
+  grepl(
+    "Tuberous sclerosis 2",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+
+tuberous_sclerosis2_excl_results <- analyse_protein_group(
+  group_data = tuberous_sclerosis2_excl_analysis,
+  group_name = "Tuberous sclerosis 2 (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  tuberous_sclerosis2_results,
+  paste0(results_dir, "tuberous_sclerosis2_bootstrap_results.csv")
+)
+
+fwrite(
+  tuberous_sclerosis2_excl_results,
+  paste0(results_dir, "tuberous_sclerosis2_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, retinal dystrophy}
+
+library(data.table)
+
+# 1. Retinitis pigmentosa (non-exclusive)
+retinitis_pigmentosa_analysis <- disease_set[
+  grepl(
+    "Retinitis pigmentosa",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  )
+]
+
+retinitis_pigmentosa_results <- analyse_protein_group(
+  group_data = retinitis_pigmentosa_analysis,
+  group_name = "Retinitis pigmentosa",
+  B = 5000
+)
+
+# 2. Retinitis pigmentosa (exclusive: exclude rows containing "|")
+retinitis_pigmentosa_excl_analysis <- disease_set[
+  grepl(
+    "Retinitis pigmentosa",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+
+retinitis_pigmentosa_excl_results <- analyse_protein_group(
+  group_data = retinitis_pigmentosa_excl_analysis,
+  group_name = "Retinitis pigmentosa (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  retinitis_pigmentosa_results,
+  paste0(results_dir, "retinitis_pigmentosa_bootstrap_results.csv")
+)
+
+fwrite(
+  retinitis_pigmentosa_excl_results,
+  paste0(results_dir, "retinitis_pigmentosa_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, Phenylketonuria}
+
+# 1. Phenylketonuria (non-exclusive)
+phenylketonuria_analysis <- disease_set[
+  grepl(
+    "Phenylketonuria",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  )
+]
+
+phenylketonuria_results <- analyse_protein_group(
+  group_data = phenylketonuria_analysis,
+  group_name = "Phenylketonuria",
+  B = 5000
+)
+
+# 2. Phenylketonuria (exclusive: exclude rows containing "|")
+phenylketonuria_excl_analysis <- disease_set[
+  grepl(
+    "Phenylketonuria",
+    disease_set$PhenotypeList,
+    ignore.case = FALSE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+
+phenylketonuria_excl_results <- analyse_protein_group(
+  group_data = phenylketonuria_excl_analysis,
+  group_name = "Phenylketonuria (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  phenylketonuria_results,
+  paste0(results_dir, "phenylketonuria_bootstrap_results.csv")
+)
+
+fwrite(
+  phenylketonuria_excl_results,
+  paste0(results_dir, "phenylketonuria_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, intellectual disability}
+
+# 1. Intellectual disability (non-exclusive)
+intellectual_disability_analysis <- disease_set[
+  grepl(
+    "intellectual disability",
+    disease_set$PhenotypeList,
+    ignore.case = TRUE
+  )
+]
+
+intellectual_disability_results <- analyse_protein_group(
+  group_data = intellectual_disability_analysis,
+  group_name = "Intellectual disability",
+  B = 5000
+)
+
+# 2. Intellectual disability (exclusive: exclude rows containing "|")
+intellectual_disability_excl_analysis <- disease_set[
+  grepl(
+    "intellectual disability",
+    disease_set$PhenotypeList,
+    ignore.case = TRUE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+
+intellectual_disability_excl_results <- analyse_protein_group(
+  group_data = intellectual_disability_excl_analysis,
+  group_name = "Intellectual disability (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  intellectual_disability_results,
+  paste0(results_dir, "intellectual_disability_bootstrap_results.csv")
+)
+
+fwrite(
+  intellectual_disability_excl_results,
+  paste0(results_dir, "intellectual_disability_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, Hereditary nonpolyposis colorectal}
+
+library(data.table)
+
+# 1. Hereditary nonpolyposis colorectal cancer (non-exclusive)
+hnpcc_analysis <- disease_set[
+  grepl(
+    "Hereditary nonpolyposis colorectal",
+    disease_set$PhenotypeList,
+    ignore.case = TRUE
+  ),
+]
+
+hnpcc_results <- analyse_protein_group(
+  group_data = hnpcc_analysis,
+  group_name = "Hereditary nonpolyposis colorectal cancer",
+  B = 5000
+)
+
+# 2. Hereditary nonpolyposis colorectal cancer (exclusive)
+# Exclude rows whose PhenotypeList contains "|"
+hnpcc_excl_analysis <- disease_set[
+  grepl(
+    "Hereditary nonpolyposis colorectal",
+    disease_set$PhenotypeList,
+    ignore.case = TRUE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE),
+]
+
+hnpcc_excl_results <- analyse_protein_group(
+  group_data = hnpcc_excl_analysis,
+  group_name = "Hereditary nonpolyposis colorectal cancer (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results in the same directory as the other analyses
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  hnpcc_results,
+  paste0(results_dir, "hereditary_nonpolyposis_colorectal_bootstrap_results.csv")
+)
+
+fwrite(
+  hnpcc_excl_results,
+  paste0(results_dir, "hereditary_nonpolyposis_colorectal_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, autism spectrum disorder}
+
+# 1. Autism spectrum disorder (non-exclusive)
+autism_spectrum_disorder_analysis <- disease_set[
+  grepl(
+    "autism spectrum disorder",
+    disease_set$PhenotypeList,
+    ignore.case = TRUE
+  )
+]
+
+autism_spectrum_disorder_results <- analyse_protein_group(
+  group_data = autism_spectrum_disorder_analysis,
+  group_name = "Autism spectrum disorder",
+  B = 5000
+)
+
+# 2. Autism spectrum disorder (exclusive: exclude rows containing "|")
+autism_spectrum_disorder_excl_analysis <- disease_set[
+  grepl(
+    "autism spectrum disorder",
+    disease_set$PhenotypeList,
+    ignore.case = TRUE
+  ) &
+    !grepl("|", disease_set$PhenotypeList, fixed = TRUE)
+]
+
+autism_spectrum_disorder_excl_results <- analyse_protein_group(
+  group_data = autism_spectrum_disorder_excl_analysis,
+  group_name = "Autism spectrum disorder (excluding multiple phenotypes)",
+  B = 5000
+)
+
+# 3. Save results separately
+results_dir <- "~/alphamissense_analysis/results/"
+
+fwrite(
+  autism_spectrum_disorder_results,
+  paste0(results_dir, "autism_spectrum_disorder_bootstrap_results.csv")
+)
+
+fwrite(
+  autism_spectrum_disorder_excl_results,
+  paste0(results_dir, "autism_spectrum_disorder_excl_bootstrap_results.csv")
+)
+
+```
+
+```{r, kinsase analysis}
+
+library(data.table)
+library(pROC)
+
+set.seed(123)
+B <- 5000
+
+## Read kinase UniProt IDs
+
+kinase_uniprots <- fread(
+  "~/alphamissense_analysis/protein_groupings/kinases.csv",
+  header = FALSE
+)
+
+## Select kinase variants
+
+am_kinase_analysis <- data[
+  uniprot %in% kinase_uniprots$V1
+]
+
+## Run analysis function
+
+kinase_results <- analyse_protein_group(
+  group_data = am_kinase_analysis,
+  group_name = "Kinases",
+  B = B
+)
+
+## Print results
+
+print(kinase_results)
+
+## Save results
+
+fwrite(
+  kinase_results,
+  "~/alphamissense_analysis/results/kinase_bootstrap_results.csv"
+)
+
+```
+
+```{r, analyse kinase subgroups}
+
+library(data.table)
+
+# Define kinase subgroups by Pfam annotation
+tyrosine_serine_threonine <- data[
+  data$pfam_name == "Protein tyrosine and serine/threonine kinase"
+]
+tyrosine_serine_threonine_proteins <- unique(tyrosine_serine_threonine$uniprot)
+
+kinase_domain <- data[data$pfam_id == "PF00069"]
+kinase_domain_proteins <- unique(kinase_domain$uniprot)
+
+histidine_kinase <- data[data$pfam_id == "PF13589"]
+histidine_kinase_proteins <- unique(histidine_kinase$uniprot)
+
+deoxy_kinase <- data[data$pfam_id == "PF01712"]
+deoxy_kinase_proteins <- unique(deoxy_kinase$uniprot)
+
+phosphatid_kinase <- data[data$pfam_id == "PF00454"]
+phosphatid_kinase_proteins <- unique(phosphatid_kinase$uniprot)
+
+dap_kinase <- data[data$pfam_id == "PF08477"]
+dap_kinase_proteins <- unique(dap_kinase$uniprot)
+
+phosphoglycerate_kinase <- data[data$pfam_id == "PF00162"]
+phosphoglycerate_kinase_proteins <- unique(phosphoglycerate_kinase$uniprot)
+
+guanylate_kinase <- data[data$pfam_id == "PF00625"]
+guanylate_kinase_proteins <- unique(guanylate_kinase$uniprot)
+
+
+# Extract all variants for proteins in each subgroup
+tyrosine_serine_threonine_variants <-
+  data[data$uniprot %in% tyrosine_serine_threonine_proteins]
+
+kinase_domain_variants <-
+  data[data$uniprot %in% kinase_domain_proteins]
+
+histidine_kinase_variants <-
+  data[data$uniprot %in% histidine_kinase_proteins]
+
+deoxy_kinase_variants <-
+  data[data$uniprot %in% deoxy_kinase_proteins]
+
+phosphatid_kinase_variants <-
+  data[data$uniprot %in% phosphatid_kinase_proteins]
+
+dap_kinase_variants <-
+  data[data$uniprot %in% dap_kinase_proteins]
+
+phosphoglycerate_kinase_variants <-
+  data[data$uniprot %in% phosphoglycerate_kinase_proteins]
+
+guanylate_kinase_variants <-
+  data[data$uniprot %in% guanylate_kinase_proteins]
+
+
+# Analyse each subgroup
+# Use B = 50 for a quick test, then B = 5000 for final results
+
+tyrosine_serine_threonine_results <- analyse_protein_group(
+  group_data = tyrosine_serine_threonine_variants,
+  group_name = "Tyrosine and serine/threonine kinase",
+  B = 5000
+)
+
+kinase_domain_results <- analyse_protein_group(
+  group_data = kinase_domain_variants,
+  group_name = "Kinase domain PF00069",
+  B = 5000
+)
+
+histidine_kinase_results <- analyse_protein_group(
+  group_data = histidine_kinase_variants,
+  group_name = "Histidine kinase PF13589",
+  B = 5000
+)
+
+deoxy_kinase_results <- analyse_protein_group(
+  group_data = deoxy_kinase_variants,
+  group_name = "Deoxy kinase PF01712",
+  B = 5000
+)
+
+phosphatid_kinase_results <- analyse_protein_group(
+  group_data = phosphatid_kinase_variants,
+  group_name = "Phosphatidyl kinase PF00454",
+  B = 5000
+)
+
+dap_kinase_results <- analyse_protein_group(
+  group_data = dap_kinase_variants,
+  group_name = "DAP kinase PF08477",
+  B = 5000
+)
+
+phosphoglycerate_kinase_results <- analyse_protein_group(
+  group_data = phosphoglycerate_kinase_variants,
+  group_name = "Phosphoglycerate kinase PF00162",
+  B = 5000
+)
+
+guanylate_kinase_results <- analyse_protein_group(
+  group_data = guanylate_kinase_variants,
+  group_name = "Guanylate kinase PF00625",
+  B = 5000
+)
+
+
+# Combine results into one table
+kinase_subgroup_results <- rbindlist(
+  list(
+    tyrosine_serine_threonine_results,
+    kinase_domain_results,
+    histidine_kinase_results,
+    deoxy_kinase_results,
+    phosphatid_kinase_results,
+    dap_kinase_results,
+    phosphoglycerate_kinase_results,
+    guanylate_kinase_results
+  ),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+# Display results
+print(kinase_subgroup_results)
+
+
+# Save results
+fwrite(
+  kinase_subgroup_results,
+  "~/alphamissense_analysis/results/kinase_subgroup_bootstrap_results.csv"
+)
+
+```
+
+```{r, muts mcc analysis}
+
+# Identify proteins with a Pfam name containing "MutS"
+am_muts_analysis <- data[
+  grep("MutS", data$pfam_name, ignore.case = TRUE)
+]
+
+# Inspect unique Pfam IDs
+unique(am_muts_analysis$pfam_id)
+
+# Get unique proteins and include all their variants
+muts_protein_list <- unique(am_muts_analysis$uniprot)
+muts_protein_counts <- length(muts_protein_list)
+
+am_muts_analysis <- data[data$uniprot %in% muts_protein_list]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for the final analysis
+muts_results <- analyse_protein_group(
+  group_data = am_muts_analysis,
+  group_name = "MutS",
+  B = 5000
+)
+
+# Display results
+print(muts_results)
+
+# Save results
+fwrite(
+  muts_results,
+  "~/alphamissense_analysis/results/muts_bootstrap_results.csv"
+)
+
+```
+
+```{r, broad transmembrane analysis}
+
+library(kableExtra)
+library(magrittr)
+library(data.table)
+
+# Define output directory
+results_dir <- "~/alphamissense_analysis/results/"
+
+# Get unique membrane categories
+membrane_features <- unique(data$membrane_domain)
+
+# Initialise combined result tables
+membrane_bootstrap_results <- data.table()
+membrane_bootstrap_excl_results <- data.table()
+
+for (i in seq_along(membrane_features)) {
+
+  feature <- membrane_features[i]
+
+  # Create a filename-safe category name
+  if (is.na(feature)) {
+    feature_name <- "missing"
+  } else {
+    feature_name <- gsub(
+      "[^A-Za-z0-9]+", "_", trimws(as.character(feature))
+    )
+    feature_name <- gsub("^_|_$", "", feature_name)
+  }
+
+  # Subset data for this membrane category
+  if (is.na(feature)) {
+    membrane <- data[is.na(data$membrane_domain), ]
+  } else {
+    membrane <- data[data$membrane_domain == feature, ]
+  }
+
+  # Skip empty categories
+  if (nrow(membrane) == 0) {
+    next
+  }
+
+  # 1. Non-exclusive bootstrap analysis
+  result <- analyse_protein_group(
+    group_data = membrane,
+    group_name = paste("Membrane", feature_name),
+    B = 5000
+  )
+
+  # Convert returned result to a data.table
+  result_dt <- as.data.table(result)
+
+  # Add category identifier
+  result_dt[, membrane_feature := feature_name]
+
+  # Append to combined results
+  membrane_bootstrap_results <- rbindlist(
+    list(membrane_bootstrap_results, result_dt),
+    fill = TRUE
+  )
+
+  # 2. Exclusive bootstrap analysis
+  # Exclude rows with multiple phenotypes, indicated by "|"
+  membrane_excl <- membrane[
+    !grepl("|", membrane$PhenotypeList, fixed = TRUE),
+  ]
+
+  if (nrow(membrane_excl) > 0) {
+
+    result_excl <- analyse_protein_group(
+      group_data = membrane_excl,
+      group_name = paste(
+        "Membrane", feature_name,
+        "(excluding multiple phenotypes)"
+      ),
+      B = 5000
+    )
+
+    # Convert returned result to a data.table
+    result_excl_dt <- as.data.table(result_excl)
+
+    # Add category identifier
+    result_excl_dt[, membrane_feature := feature_name]
+
+    # Append to combined exclusive results
+    membrane_bootstrap_excl_results <- rbindlist(
+      list(membrane_bootstrap_excl_results, result_excl_dt),
+      fill = TRUE
+    )
+  }
+}
+
+# Save combined results
+fwrite(
+  membrane_bootstrap_results,
+  file.path(results_dir, "membrane_bootstrap_results.csv")
+)
+
+fwrite(
+  membrane_bootstrap_excl_results,
+  file.path(results_dir, "membrane_bootstrap_excl_results.csv")
+)
+
+# Inspect results
+print(membrane_bootstrap_results)
+print(membrane_bootstrap_excl_results)
+
+
+## Identify number of proteins associated with each category of interest
+
+transmem <- data[data$membrane_domain == "Transmembrane"]
+transmem_proteins <- length(unique(transmem$uniprot))
+wilcox.test(transmem$am_score, transmem$esm1b_normalized, paired = TRUE)
+
+intramem <- data[data$membrane_domain == "Intramembrane"]
+intramem_proteins <- length(unique(intramem$uniprot))
+wilcox.test(intramem$am_score, intramem$esm1b_normalized, paired = TRUE)
+
+topo <- data[data$membrane_domain == "Topological domain"]
+topo_proteins <- length(unique(topo$uniprot))
+wilcox.test(topo$am_score, topo$esm1b_normalized, paired = TRUE)
+
+## Create a table which I can present
+
+data_presentable <- membrane_perf
+colnames(data_presentable) <- c("Membrane Feature", "AM AUC", "ESM-1b AUC", "AM MCC", "ESM-1b MCC", "Total counts", "Pathogenic counts", "Benign counts")
+
+data_presentable$`AM AUC` <- round(data_presentable$`AM AUC`, digits = 4)
+data_presentable$`ESM-1b AUC` <- round(data_presentable$`ESM-1b AUC`, digits = 4)
+data_presentable$`AM MCC` <- round(data_presentable$`AM MCC`, digits = 4)
+data_presentable$`ESM-1b MCC` <- round(data_presentable$`ESM-1b MCC`, digits = 4)
+
+data_presentable <- data_presentable[-1,]
+
+membrane_table <- data_presentable %>%
+  kbl(caption = "Membrane Results") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+membrane_table
+
+```
+
+```{r, Actin}
+
+library(data.table)
+
+# Identify proteins with a Pfam name containing "Actin"
+am_actin_analysis <- data[
+  grep("Actin", data$pfam_name, fixed = TRUE)
+]
+
+# Get unique proteins
+actin_protein_list <- unique(am_actin_analysis$uniprot)
+actin_protein_count <- length(actin_protein_list)
+
+# Include all variants from the identified proteins
+am_actin_analysis <- data[data$uniprot %in% actin_protein_list]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for final results
+actin_results <- analyse_protein_group(
+  group_data = am_actin_analysis,
+  group_name = "Actin",
+  B = 5000
+)
+
+# Display results
+print(actin_results)
+
+# Save results
+fwrite(
+  actin_results,
+  "~/alphamissense_analysis/results/actin_bootstrap_results.csv"
+)
+
+```
+
+```{r, Myosin}
+
+myosin <- fread("~/alphamissense_analysis/protein_groupings/myosin.csv", header = F)
+myosin_variants <- data[data$uniprot %in% myosin$V1]
+myosin_protein_list <- unique(myosin_variants$uniprot)
+myosin_protein_count <- length(myosin_protein_list)
+
+myosin_am_mcc <- mccr(myosin_variants$clinical_prediction, myosin_variants$am_prediction)
+myosin_esm_mcc <- mccr(myosin_variants$clinical_prediction, myosin_variants$esm1b_prediction)
+
+roc_object <- roc(myosin_variants$clinical_prediction, myosin_variants$am_score)
+myosin_am_auc <- roc_object$auc
+
+myosin_am_auc <- as.numeric(paste(myosin_am_auc))
+
+roc_object <- roc(myosin_variants$clinical_prediction, myosin_variants$esm1b_score)
+myosin_esm_auc <- roc_object$auc
+
+myosin_esm_auc <- as.numeric(paste(myosin_esm_auc))
+
+myosin_benign_counts <- nrow(myosin_variants[myosin_variants$clinical_prediction == 0])
+myosin_patho_counts <- nrow(myosin_variants[myosin_variants$clinical_prediction == 1])
+
+row <- data.table("Myosin", myosin_protein_count, myosin_benign_counts, myosin_patho_counts, myosin_am_auc, myosin_am_mcc, myosin_esm_auc, myosin_esm_mcc)
+colnames(row) <- c("name", "protein_count", "benign_counts", "path_counts", "am_auc", "am_mcc", "esm_auc", "esm_mcc")
+struc_proteins <- bind_rows(struc_proteins, row)
+
+```
+
+```{r, intermediate filaments}
+
+library(data.table)
+
+# Load intermediate-filament protein list
+inter_fila <- fread(
+  "/work/am_comparison_project/alphamissense_analysis/protein_groupings/if.csv",
+  header = FALSE
+)
+
+# Extract variants belonging to intermediate-filament proteins
+inter_fila_variants <- data[
+  data$uniprot %in% inter_fila$V1
+]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for final results
+inter_fila_results <- analyse_protein_group(
+  group_data = inter_fila_variants,
+  group_name = "Intermediate filaments (IF)",
+  B = 5000
+)
+
+# Display results
+print(inter_fila_results)
+
+# Save results
+fwrite(
+  inter_fila_results,
+  "~/alphamissense_analysis/results/intermediate_filaments_bootstrap_results.csv"
+)
+
+```
+
+```{r, elastin statistical test}
+
+# Extract elastin variants
+elastin_variants <- data[data$uniprot == "P15502"]
+
+# Run the same analysis
+elastin_results <- analyse_protein_group(
+  group_data = elastin_variants,
+  group_name = "Elastin (P15502)",
+  B = 5000
+)
+
+# Display results
+print(elastin_results)
+
+# Save results
+fwrite(
+  elastin_results,
+  "~/alphamissense_analysis/results/elastin_bootstrap_results.csv"
+)
+
+```
+
+```{r, testing overlap of inter and keratin}
+
+overlap <- fintersect(inter_fila_variants, keratins_variants)
+
+nrow(overlap)
+nrow(inter_fila_variants)
+nrow(keratins_variants)
+
+n_common_variants <- sum(inter_fila_variants %in% keratins_variants)
+
+```
+
+
+```{r, growth factors & cytokines}
+
+library(data.table)
+library(pROC)
+
+set.seed(123)
+B <- 5000
+
+## Read protein lists
+
+gf <- fread(
+  "~/alphamissense_analysis/protein_groupings/growth_factors.csv",
+  header = FALSE
+)
+
+cytokines <- fread(
+  "~/alphamissense_analysis/protein_groupings/cytokines.csv",
+  header = FALSE
+)
+
+## Select variants using the original protein lists
+
+gf_variants <- data[
+  uniprot %in% gf$V1
+]
+
+cytokine_variants <- data[
+  uniprot %in% cytokines$V1
+]
+
+## Combined group: union of both original groups
+## Remove duplicate rows from the combined group only
+
+gf_cytokines_variants <- unique(
+  rbindlist(
+    list(
+      gf_variants,
+      cytokine_variants
+    ),
+    use.names = TRUE,
+    fill = TRUE
+  )
+)
+
+## Run growth factors analysis
+
+gf_results <- analyse_protein_group(
+  group_data = gf_variants,
+  group_name = "Growth factors",
+  B = B
+)
+
+## Run cytokines analysis
+
+cytokine_results <- analyse_protein_group(
+  group_data = cytokine_variants,
+  group_name = "Cytokines",
+  B = B
+)
+
+## Run combined growth factors and cytokines analysis
+
+gf_cytokines_results <- analyse_protein_group(
+  group_data = gf_cytokines_variants,
+  group_name = "Growth factors and cytokines",
+  B = B
+)
+
+## Combine results
+
+gf_cytokine_results <- rbindlist(
+  list(
+    gf_results,
+    cytokine_results,
+    gf_cytokines_results
+  ),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+## Print results
+
+print(gf_cytokine_results)
+
+## Save results
+
+fwrite(
+  gf_cytokine_results,
+  "~/alphamissense_analysis/results/growth_factors_cytokines_bootstrap_results.csv"
+)
+
+```
+
+```{r, vg ion channels}
+
+vg <- fread("~/alphamissense_analysis/protein_groupings/vg_ion_channels.csv", header = F)
+vg_variants <- data[data$uniprot %in% vg$V1]
+vg_protein_list <- unique(vg_variants$uniprot)
+vg_protein_count <- length(vg_protein_list)
+
+vg_am_mcc <- mccr(vg_variants$clinical_prediction, vg_variants$am_prediction)
+vg_esm_mcc <- mccr(vg_variants$clinical_prediction, vg_variants$esm1b_prediction)
+
+roc_object <- roc(vg_variants$clinical_prediction, vg_variants$am_score)
+vg_am_auc <- roc_object$auc
+
+vg_am_auc <- as.numeric(paste(vg_am_auc))
+
+roc_object <- roc(vg_variants$clinical_prediction, vg_variants$esm1b_score)
+vg_esm_auc <- roc_object$auc
+
+vg_esm_auc <- as.numeric(paste(vg_esm_auc))
+
+vg_benign_counts <- nrow(vg_variants[vg_variants$clinical_prediction == 0])
+vg_patho_counts <- nrow(vg_variants[vg_variants$clinical_prediction == 1])
+
+wilcox.test(vg_variants$am_score, vg_variants$esm1b_normalized, paired = TRUE)
+
+```
+
+```{r, lg ion channels}
+
+lg <- fread("~/alphamissense_analysis/protein_groupings/lg_ion_channels.csv", header = F)
+lg_variants <- data[data$uniprot %in% lg$V1]
+lg_protein_list <- unique(lg_variants$uniprot)
+lg_protein_count <- length(lg_protein_list)
+
+lg_am_mcc <- mccr(lg_variants$clinical_prediction, lg_variants$am_prediction)
+lg_esm_mcc <- mccr(lg_variants$clinical_prediction, lg_variants$esm1b_prediction)
+
+roc_object <- roc(lg_variants$clinical_prediction, lg_variants$am_score)
+lg_am_auc <- roc_object$auc
+
+lg_am_auc <- as.numeric(paste(lg_am_auc))
+
+roc_object <- roc(lg_variants$clinical_prediction, lg_variants$esm1b_score)
+lg_esm_auc <- roc_object$auc
+
+lg_esm_auc <- as.numeric(paste(lg_esm_auc))
+
+lg_benign_counts <- nrow(lg_variants[lg_variants$clinical_prediction == 0])
+lg_patho_counts <- nrow(lg_variants[lg_variants$clinical_prediction == 1])
+
+wilcox.test(lg_variants$am_score, lg_variants$esm1b_normalized, paired = TRUE)
+
+```
+
+```{r, calcium channels}
+
+calcium <- fread("~/alphamissense_analysis/protein_groupings/calcium_channels.csv", header = F)
+calcium_variants <- data[data$uniprot %in% calcium$V1]
+calcium_protein_list <- unique(calcium_variants$uniprot)
+calcium_protein_count <- length(calcium_protein_list)
+
+calcium_am_mcc <- mccr(calcium_variants$clinical_prediction, calcium_variants$am_prediction)
+calcium_esm_mcc <- mccr(calcium_variants$clinical_prediction, calcium_variants$esm1b_prediction)
+
+roc_object <- roc(calcium_variants$clinical_prediction, calcium_variants$am_score)
+calcium_am_auc <- roc_object$auc
+
+calcium_am_auc <- as.numeric(paste(calcium_am_auc))
+
+roc_object <- roc(calcium_variants$clinical_prediction, calcium_variants$esm1b_score)
+calcium_esm_auc <- roc_object$auc
+
+calcium_esm_auc <- as.numeric(paste(calcium_esm_auc))
+
+calcium_benign_counts <- nrow(calcium_variants[calcium_variants$clinical_prediction == 0])
+calcium_patho_counts <- nrow(calcium_variants[calcium_variants$clinical_prediction == 1])
+
+wilcox.test(calcium_variants$am_score, calcium_variants$esm1b_normalized, paired = TRUE)
+
+```
+
+```{r, chloride channels}
+
+chloride <- fread("~/alphamissense_analysis/protein_groupings/chloride_channels.csv", header = F)
+chloride_variants <- data[data$uniprot %in% chloride$V1]
+chloride_protein_list <- unique(chloride_variants$uniprot)
+chloride_protein_count <- length(chloride_protein_list)
+
+chloride_am_mcc <- mccr(chloride_variants$clinical_prediction, chloride_variants$am_prediction)
+chloride_esm_mcc <- mccr(chloride_variants$clinical_prediction, chloride_variants$esm1b_prediction)
+
+roc_object <- roc(chloride_variants$clinical_prediction, chloride_variants$am_score)
+chloride_am_auc <- roc_object$auc
+
+chloride_am_auc <- as.numeric(paste(chloride_am_auc))
+
+roc_object <- roc(chloride_variants$clinical_prediction, chloride_variants$esm1b_score)
+chloride_esm_auc <- roc_object$auc
+
+chloride_esm_auc <- as.numeric(paste(calcium_esm_auc))
+
+chloride_benign_counts <- nrow(chloride_variants[chloride_variants$clinical_prediction == 0])
+chloride_patho_counts <- nrow(chloride_variants[chloride_variants$clinical_prediction == 1])
+
+wilcox.test(chloride_variants$am_score, chloride_variants$esm1b_normalized, paired = TRUE)
+
+```
+
+```{r, potassium channels}
+
+potassium <- fread("~/alphamissense_analysis/protein_groupings/potassium_channels.csv", header = F)
+potassium_variants <- data[data$uniprot %in% potassium$V1]
+potassium_protein_list <- unique(potassium_variants$uniprot)
+potassium_protein_count <- length(potassium_protein_list)
+
+potassium_am_mcc <- mccr(potassium_variants$clinical_prediction, potassium_variants$am_prediction)
+potassium_esm_mcc <- mccr(potassium_variants$clinical_prediction, potassium_variants$esm1b_prediction)
+
+roc_object <- roc(potassium_variants$clinical_prediction, potassium_variants$am_score)
+potassium_am_auc <- roc_object$auc
+
+potassium_am_auc <- as.numeric(paste(potassium_am_auc))
+
+roc_object <- roc(potassium_variants$clinical_prediction, potassium_variants$esm1b_score)
+potassium_esm_auc <- roc_object$auc
+
+potassium_esm_auc <- as.numeric(paste(potassium_esm_auc))
+
+potassium_benign_counts <- nrow(potassium_variants[potassium_variants$clinical_prediction == 0])
+potassium_patho_counts <- nrow(potassium_variants[potassium_variants$clinical_prediction == 1])
+
+wilcox.test(potassium_variants$am_score, potassium_variants$esm1b_normalized, paired = TRUE)
+
+```
+
+```{r, sodium channels}
+
+sodium <- fread("~/alphamissense_analysis/protein_groupings/sodium_channels.csv", header = F)
+sodium_variants <- data[data$uniprot %in% sodium$V1]
+sodium_protein_list <- unique(sodium_variants$uniprot)
+sodium_protein_count <- length(sodium_protein_list)
+
+sodium_am_mcc <- mccr(sodium_variants$clinical_prediction, sodium_variants$am_prediction)
+sodium_esm_mcc <- mccr(sodium_variants$clinical_prediction, sodium_variants$esm1b_prediction)
+
+roc_object <- roc(sodium_variants$clinical_prediction, sodium_variants$am_score)
+sodium_am_auc <- roc_object$auc
+
+sodium_am_auc <- as.numeric(paste(sodium_am_auc))
+
+roc_object <- roc(sodium_variants$clinical_prediction, sodium_variants$esm1b_score)
+sodium_esm_auc <- roc_object$auc
+
+sodium_esm_auc <- as.numeric(paste(sodium_esm_auc))
+
+sodium_benign_counts <- nrow(sodium_variants[sodium_variants$clinical_prediction == 0])
+sodium_patho_counts <- nrow(sodium_variants[sodium_variants$clinical_prediction == 1])
+
+wilcox.test(sodium_variants$am_score, sodium_variants$esm1b_normalized, paired = TRUE)
+
+```
+
+```{r, cell adhesion}
+
+# Load cell-adhesion protein list
+adhesion <- fread(
+  "~/alphamissense_analysis/protein_groupings/cell_adhesion.csv",
+  header = FALSE
+)
+
+# Extract variants belonging to cell-adhesion proteins
+adhesion_variants <- data[data$uniprot %in% adhesion$V1]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for the final analysis
+adhesion_results <- analyse_protein_group(
+  group_data = adhesion_variants,
+  group_name = "Cell adhesion",
+  B = 5000
+)
+
+# Display results
+print(adhesion_results)
+
+# Save results
+fwrite(
+  adhesion_results,
+  "~/alphamissense_analysis/results/cell_adhesion_bootstrap_results.csv"
+)
+
+```
+
+```{r, dna repair}
+
+# Load DNA-repair protein list
+dr <- fread(
+  "/work/am_comparison_project/alphamissense_analysis/protein_groupings/dna_repair.csv",
+  header = FALSE
+)
+
+# Extract variants belonging to DNA-repair proteins
+dr_variants <- data[data$uniprot %in% dr$V1]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for the final analysis
+dr_results <- analyse_protein_group(
+  group_data = dr_variants,
+  group_name = "DNA repair",
+  B = 5000
+)
+
+# Display results
+print(dr_results)
+
+# Save results
+fwrite(
+  dr_results,
+  "~/alphamissense_analysis/results/dna_repair_bootstrap_results.csv"
+)
+
+```
+
+```{r, transcription factors}
+
+# Identify proteins with a Pfam name containing "transcription factor"
+am_tf_analysis <- data[
+  grep("transcription factor", data$pfam_name, ignore.case = TRUE)
+]
+
+# Inspect unique Pfam IDs
+unique(am_tf_analysis$pfam_id)
+
+# Get unique proteins and include all their variants
+tf_protein_list <- unique(am_tf_analysis$uniprot)
+am_tf_analysis <- data[data$uniprot %in% tf_protein_list]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for the final analysis
+tf_results <- analyse_protein_group(
+  group_data = am_tf_analysis,
+  group_name = "Transcription factors",
+  B = 5000
+)
+
+# Display results
+print(tf_results)
+
+# Save results
+fwrite(
+  tf_results,
+  "~/alphamissense_analysis/results/transcription_factors_bootstrap_results.csv"
+)
+
+wilcox.test(am_tf_analysis$am_score, am_tf_analysis$esm1b_normalized, paired = TRUE)$p.value
+
+```
+
+```{r, keratin}
+
+library(data.table)
+
+# Load keratin protein list
+keratins <- fread(
+  "~/alphamissense_analysis/protein_groupings/keratins.csv",
+  header = FALSE
+)
+
+# Extract variants belonging to keratin proteins
+keratins_variants <- data[
+  data$uniprot %in% keratins$V1
+]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for final results
+keratins_results <- analyse_protein_group(
+  group_data = keratins_variants,
+  group_name = "Keratin",
+  B = 5000
+)
+
+# Display results
+print(keratins_results)
+
+# Save results
+fwrite(
+  keratins_results,
+  "~/alphamissense_analysis/results/keratins_bootstrap_results.csv"
+)
+
+```
+
+```{r, cadherin}
+
+library(data.table)
+
+# Define cadherin protein list
+cadherin_protein_list <- c(
+  "P12830", "P19022", "P22223", "P55283", "P33151", "P55285",
+  "Q90763", "P55286", "Q9ULB4", "Q9Y6N8", "P55287", "P55289",
+  "P55290", "P55291", "O75309", "Q12864", "Q13634", "Q9H159",
+  "Q9HBT6", "Q9UJ99", "Q9H251", "Q86UP0"
+)
+
+cadherin_protein_count <- length(cadherin_protein_list)
+
+# Extract variants belonging to cadherin proteins
+am_cadherin_analysis <- data[
+  data$uniprot %in% cadherin_protein_list
+]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for final results
+cadherin_results <- analyse_protein_group(
+  group_data = am_cadherin_analysis,
+  group_name = "Cadherin",
+  B = 5000
+)
+
+# Display results
+print(cadherin_results)
+
+# Save results
+fwrite(
+  cadherin_results,
+  "~/alphamissense_analysis/results/cadherin_bootstrap_results.csv"
+)
+
+```
+
+```{r, tubulin normal results}
+
+library(data.table)
+
+# Identify Pfam annotations containing "Tubulin"
+am_tubulin_analysis <- data[
+  grep("Tubulin", data$pfam_name, ignore.case = TRUE)
+]
+
+# Exclude unwanted Pfam IDs
+excluded_pfam_ids <- c("PF03133", "PF07986", "PF12612", "PF10644")
+
+am_tubulin_analysis <- am_tubulin_analysis[
+  !pfam_id %in% excluded_pfam_ids
+]
+
+# Inspect remaining Pfam IDs
+unique(am_tubulin_analysis$pfam_id)
+
+# Identify proteins
+tubulin_protein_list <- unique(am_tubulin_analysis$uniprot)
+tubulin_protein_count <- length(tubulin_protein_list)
+
+# Include all variants from the identified proteins
+am_tubulin_analysis <- data[
+  data$uniprot %in% tubulin_protein_list
+]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for final results
+tubulin_results <- analyse_protein_group(
+  group_data = am_tubulin_analysis,
+  group_name = "Tubulin",
+  B = 5000
+)
+
+# Display results
+print(tubulin_results)
+
+# Save results
+fwrite(
+  tubulin_results,
+  "~/alphamissense_analysis/results/tubulin_bootstrap_results.csv"
+)
+
+```
+
+```{r, collagen results}
+
+library(data.table)
+
+# Identify proteins with a Pfam name containing "collagen"
+am_collagen_analysis <- data[
+  grep("collagen", data$pfam_name, ignore.case = TRUE)
+]
+
+# Inspect unique Pfam IDs
+unique(am_collagen_analysis$pfam_id)
+
+# Identify proteins
+collagen_protein_list <- unique(am_collagen_analysis$uniprot)
+collagen_protein_count <- length(collagen_protein_list)
+
+# Include all variants from the identified proteins
+am_collagen_analysis <- data[
+  data$uniprot %in% collagen_protein_list
+]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for final results
+collagen_results <- analyse_protein_group(
+  group_data = am_collagen_analysis,
+  group_name = "Collagen",
+  B = 5000
+)
+
+# Display results
+print(collagen_results)
+
+# Save results
+fwrite(
+  collagen_results,
+  "~/alphamissense_analysis/results/collagen_bootstrap_results.csv"
+)
+
+```
+
+```{r, myosin results (pfam)}
+
+library(data.table)
+
+# Identify proteins with a Pfam name containing "myosin"
+am_myosin_analysis <- data[
+  grep("myosin", data$pfam_name, ignore.case = TRUE)
+]
+
+# Exclude Pfam ID PF11701
+am_myosin_analysis <- am_myosin_analysis[
+  !grepl("PF11701", pfam_id, ignore.case = TRUE)
+]
+
+# Inspect remaining Pfam IDs
+unique(am_myosin_analysis$pfam_id)
+
+# Identify proteins
+myosin_protein_list <- unique(am_myosin_analysis$uniprot)
+myosin_protein_count <- length(myosin_protein_list)
+
+# Include all variants from the identified proteins
+am_myosin_analysis <- data[
+  data$uniprot %in% myosin_protein_list
+]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for final results
+myosin_results <- analyse_protein_group(
+  group_data = am_myosin_analysis,
+  group_name = "Myosin",
+  B = 5000
+)
+
+# Display results
+print(myosin_results)
+
+# Save results
+fwrite(
+  myosin_results,
+  "~/alphamissense_analysis/results/myosin_bootstrap_results.csv"
+)
+
+```
+
+```{r, blood coagulation}
+
+# Load blood-coagulation protein list
+blood_proteins <- fread(
+  "/work/am_comparison_project/alphamissense_analysis/protein_groupings/blood_coag.csv",
+  header = FALSE
+)
+
+# Extract variants belonging to blood-coagulation proteins
+am_blood_analysis <- data[data$uniprot %in% blood_proteins$V1]
+
+# Run the same analysis as the other protein groups
+# Use B = 50 for a quick test, then B = 5000 for the final analysis
+blood_results <- analyse_protein_group(
+  group_data = am_blood_analysis,
+  group_name = "Blood coagulation",
+  B = 5000
+)
+
+# Display results
+print(blood_results)
+
+# Save results
+fwrite(
+  blood_results,
+  "~/alphamissense_analysis/results/blood_coagulation_bootstrap_results.csv"
+)
+
+```
